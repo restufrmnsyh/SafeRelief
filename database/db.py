@@ -79,6 +79,7 @@ def insert_user(conn: sqlite3.Connection, data: dict) -> int:
 
     Kolom yang diharapkan di `data`:
         nama_lengkap, username, password_hash, role,
+        is_active (opsional, default 1),
         posko_id (opsional), face_encoding_enc (opsional),
         dongle_serial (opsional), dongle_token_hash (opsional),
         wrapped_master_key (opsional), kdf_salt (opsional)
@@ -86,16 +87,17 @@ def insert_user(conn: sqlite3.Connection, data: dict) -> int:
     cur = conn.execute(
         """
         INSERT INTO users
-            (nama_lengkap, username, password_hash, role, posko_id,
-             face_encoding_enc, dongle_serial, dongle_token_hash,
+            (nama_lengkap, username, password_hash, role, is_active,
+             posko_id, face_encoding_enc, dongle_serial, dongle_token_hash,
              wrapped_master_key, kdf_salt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             data["nama_lengkap"],
             data["username"],
             data["password_hash"],
             data["role"],
+            data.get("is_active", 1),   # default aktif
             data.get("posko_id"),
             data.get("face_encoding_enc"),
             data.get("dongle_serial"),
