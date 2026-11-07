@@ -72,6 +72,8 @@ class DemoPanelPage(QWidget):
 
     def refresh_records(self, *_signal_args: object) -> None:
         """Muat daftar metadata yang diizinkan; data terenkripsi dibaca saat pilih."""
+        if not self._authorized():
+            return
         kind = str(self.record_type.currentData())
         self.record_input.blockSignals(True)
         self.record_input.clear()
@@ -101,6 +103,10 @@ class DemoPanelPage(QWidget):
 
     def show_selected(self, *_signal_args: object) -> None:
         """Baca raw row melalui db.py dan plaintext melalui secure_store."""
+        if not self._authorized():
+            self.raw_view.clear()
+            self.plaintext_view.clear()
+            return
         record_id = self.record_input.currentData()
         if record_id is None:
             self.raw_view.setPlainText("Tidak ada record untuk ditampilkan.")
@@ -181,3 +187,23 @@ class DemoPanelPage(QWidget):
     @staticmethod
     def _format_json(value: object) -> str:
         return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+
+    def clear_sensitive_state(self) -> None:
+        """Remove decrypted demo content from widgets before discarding page."""
+        self.raw_view.clear()
+        self.plaintext_view.clear()
+        self.record_input.clear()
+
+    def _authorized(self) -> bool:
+        """Panel ciphertext/plaintext hanya boleh dipakai admin aktif."""
+        try:
+            current = session.get_current_user()
+            if int(current["id"]) != self._user_id:
+                raise PermissionError("Sesi pengguna telah berubah.")
+            secure_store.require_active_user(
+                self._conn, self._user_id, "admin"
+            )
+            return True
+        except (RuntimeError, PermissionError, sqlite3.Error) as exc:
+            QMessageBox.warning(self, "Akses ditolak", str(exc))
+            return False

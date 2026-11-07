@@ -258,13 +258,16 @@ def list_users(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 # Posko
 # ──────────────────────────────────────────────────────────────────────
 
-def insert_posko(conn: sqlite3.Connection, data: dict) -> int:
+def insert_posko(
+    conn: sqlite3.Connection, data: dict, *, commit: bool = True
+) -> int:
     """Sisipkan posko baru. Mengembalikan id."""
     cur = conn.execute(
         "INSERT INTO posko (nama, lokasi, kapasitas) VALUES (?, ?, ?)",
         (data["nama"], data["lokasi"], data.get("kapasitas", 0)),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return cur.lastrowid
 
 
@@ -291,7 +294,9 @@ def delete_posko(conn: sqlite3.Connection, posko_id: int) -> None:
 # Victims
 # ──────────────────────────────────────────────────────────────────────
 
-def insert_victim(conn: sqlite3.Connection, data: dict) -> int:
+def insert_victim(
+    conn: sqlite3.Connection, data: dict, *, commit: bool = True
+) -> int:
     """
     Sisipkan data korban. Kolom *_enc harus sudah berupa BLOB terenkripsi.
     Mengembalikan id yang baru dibuat.
@@ -321,7 +326,8 @@ def insert_victim(conn: sqlite3.Connection, data: dict) -> int:
             data.get("created_by"),
         ),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return cur.lastrowid
 
 
@@ -551,7 +557,9 @@ def get_file_by_id(conn: sqlite3.Connection, file_id: int) -> Optional[sqlite3.R
 # Blockchain
 # ──────────────────────────────────────────────────────────────────────
 
-def save_block(conn: sqlite3.Connection, block_dict: dict) -> None:
+def save_block(
+    conn: sqlite3.Connection, block_dict: dict, *, commit: bool = True
+) -> None:
     """
     Simpan satu block ke tabel blockchain.
 
@@ -581,7 +589,23 @@ def save_block(conn: sqlite3.Connection, block_dict: dict) -> None:
             block_dict["hash"],
         ),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
+
+
+def get_demo_seed_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    """Return counts used to refuse demo seeding into a populated database."""
+    return {
+        "users": int(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]),
+        "posko": int(conn.execute("SELECT COUNT(*) FROM posko").fetchone()[0]),
+        "victims": int(conn.execute("SELECT COUNT(*) FROM victims").fetchone()[0]),
+        "photos": int(conn.execute("SELECT COUNT(*) FROM photos").fetchone()[0]),
+        "messages": int(conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]),
+        "files": int(conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]),
+        "blockchain": int(
+            conn.execute("SELECT COUNT(*) FROM blockchain").fetchone()[0]
+        ),
+    }
 
 
 def update_block_data_for_demo(

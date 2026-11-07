@@ -97,6 +97,7 @@ class PhotoPage(QWidget):
         self._worker: PhotoEmbedWorker | None = None
         self._pending_metadata: dict[str, object] | None = None
         self._pending_output: Path | None = None
+        self._cancelled = False
 
         self.table = QTableWidget(0, len(self._columns))
         self.table.setHorizontalHeaderLabels(self._columns)
@@ -154,6 +155,8 @@ class PhotoPage(QWidget):
 
     def choose_photo(self) -> None:
         """Pilih sumber foto; penyisipan baru dimulai setelah konfirmasi."""
+        if not self._authorized("relawan"):
+            return
         source, _ = QFileDialog.getOpenFileName(
             self, "Pilih foto", "", "Gambar (*.png *.jpg *.jpeg *.bmp)"
         )
@@ -173,8 +176,8 @@ class PhotoPage(QWidget):
 
     def embed_photo(self, source_path: Path) -> None:
         """Enkripsi metadata lalu sisipkan ke file PNG baru bernama UUID."""
-        if self._role != "relawan":
-            raise PermissionError("Hanya relawan yang dapat menyisipkan foto.")
+        if not self._authorized("relawan"):
+            return
         if self._worker is not None:
             return
         if not source_path.is_file():
@@ -234,6 +237,14 @@ class PhotoPage(QWidget):
         worker = self._worker
         if worker is None:
             raise RuntimeError("Worker penyisipan foto tidak tersedia.")
+        if self._cancelled:
+            worker.deleteLater()
+            if self._pending_output is not None:
+                self._pending_output.unlink(missing_ok=True)
+            self._worker = None
+            self._pending_output = None
+            self._pending_metadata = None
+            return
         output = worker.output
         image_hash = worker.image_hash
         warning = worker.warning
@@ -254,6 +265,10 @@ class PhotoPage(QWidget):
             return
         if metadata is None:
             raise RuntimeError("Metadata foto tidak tersedia setelah penyisipan.")
+        if not self._authorized("relawan"):
+            if output_path is not None:
+                output_path.unlink(missing_ok=True)
+            return
         try:
             secure_store.save_photo(
                 self._conn,
@@ -276,6 +291,8 @@ class PhotoPage(QWidget):
 
     def refresh(self) -> None:
         """Muat galeri sesuai peran; relawan hanya melihat unggahannya."""
+        if not self._authorized():
+            return
         self._photos = [
             dict(row)
             for row in secure_store.list_photos(
@@ -299,8 +316,8 @@ class PhotoPage(QWidget):
 
     def extract_selected(self) -> None:
         """Admin mengekstrak LSB dan memverifikasi tag AES-GCM metadata."""
-        if self._role != "admin":
-            raise PermissionError("Hanya admin yang dapat mengekstrak foto.")
+        if not self._authorized("admin"):
+            return
         row = self.table.currentRow()
         if row < 0:
             QMessageBox.information(self, "Ekstrak foto", "Pilih foto terlebih dahulu.")
@@ -337,7 +354,35 @@ class PhotoPage(QWidget):
             raise ValueError("Path foto di database tidak valid.")
         return candidate
 
-    def stop_worker(self) -> None:
+    def stop_worker(self, *, cancel_pending: bool = False) -> None:
         """Tunggu penyisipan yang sedang berjalan sebelum jendela ditutup."""
+        self._cancelled = cancel_pending
         if self._worker is not None and self._worker.isRunning():
             self._worker.wait()
+        if cancel_pending and self._pending_output is not None:
+            self._pending_output.unlink(missing_ok=True)
+            self._pending_output = None
+
+    def _authorized(self, required_role: str | None = None) -> bool:
+        """Tolak aksi jika akun diblokir atau role sesi berubah."""
+        try:
+            current = session.get_current_user()
+            if int(current["id"]) != self._user_id:
+                raise PermissionError("Sesi pengguna telah berubah.")
+            if required_role is not None and self._role != required_role:
+                raise PermissionError(
+                    f"Hanya {required_role} yang dapat melakukan tindakan ini."
+                )
+            secure_store.require_active_user(
+                self._conn, self._user_id, self._role
+            )
+            return True
+        except (RuntimeError, PermissionError, sqlite3.Error) as exc:
+            QMessageBox.warning(self, "Akses ditolak", str(exc))
+            return False
+
+    def clear_sensitive_state(self) -> None:
+        """Clear extracted photo metadata and cached gallery rows."""
+        self.metadata_view.clear()
+        self._photos.clear()
+        self.table.setRowCount(0)

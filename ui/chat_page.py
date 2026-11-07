@@ -107,6 +107,8 @@ class ChatPage(QWidget):
 
     def refresh(self, *_signal_args: object) -> None:
         """Tampilkan pesan base64 saja dan tandai pesan masuk telah dibaca."""
+        if not self._authorized():
+            return
         self.inbox.clear()
         self.ciphertext_view.clear()
         self.plaintext_view.clear()
@@ -116,6 +118,13 @@ class ChatPage(QWidget):
             return
 
         contact_id = int(self.contact_input.currentData())
+        try:
+            secure_store.require_active_user(
+                self._conn, contact_id
+            )
+        except PermissionError as exc:
+            QMessageBox.warning(self, "Percakapan tidak tersedia", str(exc))
+            return
         db.mark_messages_read(self._conn, self._user_id, contact_id)
         messages = secure_store.get_messages(
             self._conn, self._user_id, contact_id
@@ -144,6 +153,10 @@ class ChatPage(QWidget):
         _previous: QListWidgetItem | None = None,
     ) -> None:
         """Pemilihan inbox tetap memperlihatkan ciphertext, bukan teks asli."""
+        if not self._authorized():
+            self.ciphertext_view.clear()
+            self.plaintext_view.clear()
+            return
         self.plaintext_view.clear()
         if current is None:
             self.ciphertext_view.clear()
@@ -155,8 +168,24 @@ class ChatPage(QWidget):
         )
         self.ciphertext_view.setPlainText(encoded)
 
+    def _authorized(self) -> bool:
+        """Periksa ulang sesi dan role sebelum aksi dari widget yang terbuka."""
+        try:
+            current = session.get_current_user()
+            if int(current["id"]) != self._user_id:
+                raise PermissionError("Sesi pengguna telah berubah.")
+            secure_store.require_active_user(
+                self._conn, self._user_id, self._role
+            )
+            return True
+        except (RuntimeError, PermissionError, sqlite3.Error) as exc:
+            QMessageBox.warning(self, "Akses ditolak", str(exc))
+            return False
+
     def send_message(self) -> None:
         """Enkripsi dan simpan pesan hanya untuk pasangan admin-relawan."""
+        if not self._authorized():
+            return
         text = self.message_input.toPlainText().strip()
         if not text:
             QMessageBox.information(self, "Chat", "Isi pesan terlebih dahulu.")
@@ -185,6 +214,8 @@ class ChatPage(QWidget):
 
     def decrypt_selected(self) -> None:
         """Dekripsi hanya setelah permintaan eksplisit; kunci manual untuk demo."""
+        if not self._authorized():
+            return
         item = self.inbox.currentItem()
         if item is None:
             QMessageBox.information(self, "Decrypt", "Pilih pesan terlebih dahulu.")
@@ -200,9 +231,17 @@ class ChatPage(QWidget):
                 session.get_derived_key(config.HKDF_LABEL_CHAT_ENC),
                 session.get_derived_key(config.HKDF_LABEL_CHAT_MAC),
             )
-        except (RuntimeError, ValueError) as exc:
+        except (PermissionError, RuntimeError, ValueError, sqlite3.Error) as exc:
             QMessageBox.critical(
                 self, "Gagal mendekripsi", f"Pesan tidak dapat dibuka: {exc}"
             )
             return
         self.plaintext_view.setPlainText(plaintext)
+
+    def clear_sensitive_state(self) -> None:
+        """Clear plaintext and cached conversation records when session ends."""
+        self._messages.clear()
+        self.inbox.clear()
+        self.ciphertext_view.clear()
+        self.plaintext_view.clear()
+        self.message_input.clear()

@@ -116,6 +116,7 @@ class FilesPage(QWidget):
         self._worker: QThread | None = None
         self._pending_upload: tuple[Path, Path] | None = None
         self._pending_download_id: int | None = None
+        self._cancelled = False
 
         self.table = QTableWidget(0, len(self._columns))
         self.table.setHorizontalHeaderLabels(self._columns)
@@ -158,8 +159,8 @@ class FilesPage(QWidget):
 
     def upload_file(self, source_path: Path) -> None:
         """Jalankan ChaCha20-Poly1305 di worker dan simpan record via secure_store."""
-        if self._role != "relawan":
-            raise PermissionError("Hanya relawan yang dapat mengunggah berkas.")
+        if not self._authorized("relawan"):
+            return
         if self._worker is not None:
             return
         if not source_path.is_file():
@@ -195,6 +196,10 @@ class FilesPage(QWidget):
         self.upload_button.setEnabled(True)
         if worker is not None:
             worker.deleteLater()
+        if self._cancelled:
+            if pending is not None:
+                pending[1].unlink(missing_ok=True)
+            return
         error = (
             worker.error
             if isinstance(worker, FileEncryptWorker)
@@ -207,6 +212,9 @@ class FilesPage(QWidget):
         if not isinstance(worker, FileEncryptWorker) or pending is None:
             raise RuntimeError("Hasil worker unggah tidak tersedia.")
         source_path, encrypted_path = pending
+        if not self._authorized("relawan"):
+            encrypted_path.unlink(missing_ok=True)
+            return
         try:
             secure_store.save_file(
                 self._conn,
@@ -225,8 +233,8 @@ class FilesPage(QWidget):
 
     def choose_and_download(self) -> None:
         """Minta tujuan output untuk berkas terpilih; admin-only."""
-        if self._role != "admin":
-            raise PermissionError("Hanya admin yang dapat mengunduh berkas.")
+        if not self._authorized("admin"):
+            return
         row = self.table.currentRow()
         if row < 0:
             QMessageBox.information(self, "Unduh berkas", "Pilih berkas terlebih dahulu.")
@@ -241,8 +249,8 @@ class FilesPage(QWidget):
 
     def decrypt_file(self, file_id: int, destination: Path) -> None:
         """Dekripsi berkas terpilih secara aman; hanya admin boleh memanggilnya."""
-        if self._role != "admin":
-            raise PermissionError("Hanya admin yang dapat mengunduh berkas.")
+        if not self._authorized("admin"):
+            return
         if self._worker is not None:
             return
         try:
@@ -281,6 +289,14 @@ class FilesPage(QWidget):
         self.download_button.setEnabled(True)
         if worker is not None:
             worker.deleteLater()
+        if self._cancelled:
+            if isinstance(worker, FileDecryptWorker):
+                worker.destination.unlink(missing_ok=True)
+            return
+        if not self._authorized("admin"):
+            if isinstance(worker, FileDecryptWorker):
+                worker.destination.unlink(missing_ok=True)
+            return
         error = (
             worker.error
             if isinstance(worker, FileDecryptWorker)
@@ -308,6 +324,8 @@ class FilesPage(QWidget):
 
     def refresh(self) -> None:
         """Muat daftar berkas sesuai hak akses peran aktif."""
+        if not self._authorized():
+            return
         users = {
             int(user["id"]): str(user["nama_lengkap"] or user["username"])
             for user in db.list_users(self._conn)
@@ -343,7 +361,37 @@ class FilesPage(QWidget):
             raise ValueError("Path file di database tidak valid.")
         return candidate
 
-    def stop_worker(self) -> None:
+    def stop_worker(self, *, cancel_pending: bool = False) -> None:
         """Tunggu enkripsi/dekripsi berkas sebelum jendela aplikasi ditutup."""
+        self._cancelled = cancel_pending
         if self._worker is not None and self._worker.isRunning():
             self._worker.wait()
+        if cancel_pending:
+            if self._pending_upload is not None:
+                _source, encrypted_path = self._pending_upload
+                encrypted_path.unlink(missing_ok=True)
+                self._pending_upload = None
+            if (
+                isinstance(self._worker, FileDecryptWorker)
+                and self._worker.destination.exists()
+            ):
+                self._worker.destination.unlink()
+            self._pending_download_id = None
+
+    def _authorized(self, required_role: str | None = None) -> bool:
+        """Tolak aksi jika akun diblokir atau widget berasal dari sesi lama."""
+        try:
+            current = session.get_current_user()
+            if int(current["id"]) != self._user_id:
+                raise PermissionError("Sesi pengguna telah berubah.")
+            if required_role is not None and self._role != required_role:
+                raise PermissionError(
+                    f"Hanya {required_role} yang dapat melakukan tindakan ini."
+                )
+            secure_store.require_active_user(
+                self._conn, self._user_id, self._role
+            )
+            return True
+        except (RuntimeError, PermissionError, sqlite3.Error) as exc:
+            QMessageBox.warning(self, "Akses ditolak", str(exc))
+            return False

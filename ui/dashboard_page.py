@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QLabel,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -89,6 +90,14 @@ class DashboardPage(QWidget):
 
     def refresh_summary(self) -> None:
         """Muat ulang jumlah menggunakan secure_store, bukan SQL di UI."""
+        user = session.get_current_user()
+        try:
+            secure_store.require_active_user(
+                self._conn, int(user["id"]), str(user["role"])
+            )
+        except PermissionError as exc:
+            QMessageBox.warning(self, "Akses ditolak", str(exc))
+            return
         summary = secure_store.get_dashboard_summary(self._conn)
         by_status = summary["by_status"]
         statuses = (
@@ -108,3 +117,9 @@ class DashboardPage(QWidget):
         self.post_summary.setText(
             "\n".join(posko_lines) if posko_lines else "Belum ada posko."
         )
+
+    def clear_sensitive_state(self) -> None:
+        """Clear user-identifying dashboard labels before session teardown."""
+        self.welcome_label.clear()
+        self.status_summary.clear()
+        self.post_summary.clear()

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 import config
 from auth import dongle, face_auth, login, session
 from crypto import keys
-from database import secure_store
+from database import db, secure_store
 
 
 class CameraWorker(QThread):
@@ -142,6 +142,14 @@ class LoginPage(QWidget):
         self._gate_open = message == "Dongle valid terdeteksi"
         if was_open and not self._gate_open:
             self._clear_pre_auth()
+
+    def show_session_ended(self, message: str) -> None:
+        """Tampilkan alasan sesi dihentikan setelah gerbang dongle terbuka."""
+        self._clear_pre_auth()
+        self.username_input.clear()
+        self.password_input.clear()
+        self.set_gate_status("Dongle valid terdeteksi")
+        self.message_label.setText(message)
 
     def submit_credentials(self) -> None:
         """Periksa password dan dongle akun sebelum membuka langkah wajah."""
@@ -310,6 +318,16 @@ class LoginPage(QWidget):
         master_key = self._transient_master_key
         if user is None or master_key is None:
             self.message_label.setText("Sesi autentikasi sudah kedaluwarsa.")
+            self._clear_pre_auth()
+            return
+
+        try:
+            current_user = db.get_user_by_id(self._conn, int(user["id"]))
+            if current_user is None or not current_user["is_active"]:
+                raise PermissionError("Akun dinonaktifkan saat proses login.")
+            dongle.verify_dongle(current_user)
+        except (OSError, ValueError, sqlite3.Error, PermissionError) as exc:
+            self.message_label.setText(str(exc))
             self._clear_pre_auth()
             return
 

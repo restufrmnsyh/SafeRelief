@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QLabel, QMainWindow, QStackedWidget, QVBoxLayout, 
 
 from auth import dongle
 from database import db
+from database import secure_store
 from ui.activity_log_page import ActivityLogPage
 from ui.aid_page import AidPage
 from ui.chat_page import ChatPage
@@ -55,6 +56,7 @@ class MainWindow(QMainWindow):
         self.aid_page: AidPage | None = None
         self.activity_log_page: ActivityLogPage | None = None
         self.demo_panel_page: DemoPanelPage | None = None
+        self._logout_notice: str | None = None
 
         self.pages.setCurrentWidget(self.gate_page)
         self._dongle_timer = QTimer(self)
@@ -64,11 +66,29 @@ class MainWindow(QMainWindow):
         self._dongle_timer.start()
 
     def _check_dongle(self) -> None:
-        """Periksa gerbang berkala tanpa membocorkan identitas pemilik dongle."""
+        """Periksa dongle akun aktif dan putus sesi bila faktor fisik hilang."""
+        from auth import session
+
         try:
             is_valid = dongle.is_any_valid_dongle_present(self._conn)
         except (OSError, sqlite3.Error) as exc:
-            self._show_gate(f"Gagal memeriksa dongle: {exc}")
+            if session.is_logged_in():
+                self._end_session(f"Gagal memeriksa dongle: {exc}")
+            else:
+                self._show_gate(f"Gagal memeriksa dongle: {exc}")
+            return
+
+        if session.is_logged_in():
+            try:
+                user_id = int(session.get_current_user()["id"])
+                user = db.get_user_by_id(self._conn, user_id)
+                if user is None or not user["is_active"]:
+                    self._end_session("Akun dinonaktifkan, sesi diakhiri")
+                    return
+                dongle.verify_dongle(user)
+            except (OSError, ValueError, sqlite3.Error, PermissionError):
+                self._end_session("Dongle dicabut, sesi diakhiri")
+                return
             return
 
         if is_valid:
@@ -76,8 +96,56 @@ class MainWindow(QMainWindow):
             if self.pages.currentWidget() is self.gate_page:
                 self.pages.setCurrentWidget(self.login_page)
         elif self.pages.currentWidget() is not self.dashboard_page:
-            self.login_page.set_gate_status("Dongle dilepas. Mencari dongle...")
-            self._show_gate()
+            self.login_page.set_gate_status("Mencari dongle...")
+            self._show_gate(self._logout_notice or "Mencari dongle...")
+
+        if is_valid and self._logout_notice:
+            self.login_page.show_session_ended(self._logout_notice)
+            self.pages.setCurrentWidget(self.login_page)
+            self._logout_notice = None
+
+    def _end_session(self, message: str) -> None:
+        """Buang halaman berkunci dan paksa gerbang sebelum login berikutnya."""
+        from auth import session
+
+        session.logout()
+        self._discard_authenticated_pages()
+        self._logout_notice = message
+        self.login_page.set_gate_status("Mencari dongle...")
+        try:
+            is_valid = dongle.is_any_valid_dongle_present(self._conn)
+        except (OSError, sqlite3.Error):
+            is_valid = False
+        if is_valid:
+            self.login_page.show_session_ended(message)
+            self.pages.setCurrentWidget(self.login_page)
+            self._logout_notice = None
+        else:
+            self._show_gate(message)
+
+    def _discard_authenticated_pages(self) -> None:
+        """Hapus halaman yang menyimpan identitas atau kunci turunan lama."""
+        if self.volunteer_page is not None:
+            self.volunteer_page.stop_face_capture()
+        if self.photo_page is not None:
+            self.photo_page.stop_worker(cancel_pending=True)
+        if self.files_page is not None:
+            self.files_page.stop_worker(cancel_pending=True)
+
+        names = (
+            "dashboard_page", "victims_page", "volunteer_page", "chat_page",
+            "photo_page", "files_page", "aid_page", "activity_log_page",
+            "demo_panel_page",
+        )
+        for name in names:
+            page = getattr(self, name)
+            if page is not None:
+                clear_state = getattr(page, "clear_sensitive_state", None)
+                if callable(clear_state):
+                    clear_state()
+                self.pages.removeWidget(page)
+                page.deleteLater()
+                setattr(self, name, None)
 
     def _show_gate(self, message: str = "Mencari dongle...") -> None:
         self.gate_status.setText(message)
@@ -87,8 +155,13 @@ class MainWindow(QMainWindow):
         """Tampilkan dashboard yang menyesuaikan role sesi terautentikasi."""
         from auth import session
 
-        if user.get("id") != session.get_current_user().get("id"):
+        if not session.is_logged_in() or user.get("id") != session.get_current_user().get("id"):
             raise RuntimeError("Identitas dashboard tidak cocok dengan sesi aktif.")
+        try:
+            secure_store.require_active_user(self._conn, int(user["id"]))
+        except PermissionError:
+            self._end_session("Akun dinonaktifkan, sesi diakhiri")
+            return
         if self.dashboard_page is None:
             self.dashboard_page = DashboardPage(self._conn, self)
             self.dashboard_page.page_requested.connect(self._open_page)
@@ -102,7 +175,16 @@ class MainWindow(QMainWindow):
             return
         from auth import session
 
+        if not session.is_logged_in():
+            return
         role = session.get_current_user().get("role")
+        try:
+            secure_store.require_active_user(
+                self._conn, int(session.get_current_user()["id"]), str(role)
+            )
+        except PermissionError:
+            self._end_session("Akun dinonaktifkan, sesi diakhiri")
+            return
         allowed_pages = {
             "admin": {
                 "victims", "volunteers", "chat", "photos", "files",
@@ -188,6 +270,19 @@ class MainWindow(QMainWindow):
             self.pages.setCurrentWidget(self.demo_panel_page)
 
     def _return_to_dashboard(self) -> None:
+        from auth import session
+
+        if not session.is_logged_in():
+            return
+        try:
+            secure_store.require_active_user(
+                self._conn,
+                int(session.get_current_user()["id"]),
+                str(session.get_current_user()["role"]),
+            )
+        except PermissionError:
+            self._end_session("Akun dinonaktifkan, sesi diakhiri")
+            return
         if self.dashboard_page is not None:
             self.dashboard_page.refresh_summary()
             self.pages.setCurrentWidget(self.dashboard_page)

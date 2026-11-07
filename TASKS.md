@@ -63,10 +63,10 @@ Satu halaman per sesi. UI hanya memanggil `secure_store`/`auth`, tanpa SQL.
 - **Lulus:** tiap halaman bisa dipakai tanpa error dan UI tidak membeku.
 
 ## Tahap 6: Integrasi
-- [ ] Logout otomatis saat dongle dicabut (hapus master key dari memori)
-- [ ] Pembatasan menu dan fungsi per peran (cek di lapisan logika, bukan hanya menyembunyikan tombol)
-- [ ] Blokir akun memutus sesi
-- [ ] Data contoh (seed): 1 admin (via setup), 2 relawan, sekitar 10 korban, 5 block bantuan
+- [x] Logout otomatis saat dongle dicabut (hapus master key dari memori)
+- [x] Pembatasan menu dan fungsi per peran (cek di lapisan logika, bukan hanya menyembunyikan tombol)
+- [x] Blokir akun memutus sesi
+- [x] Data contoh (seed): 1 admin (via setup), 2 relawan, sekitar 10 korban, 5 block bantuan
 - [ ] `reset_admin.py` (pemulihan lewat akses fisik, opsional)
 
 ## Tahap 7: Pengujian dan Demo

@@ -140,7 +140,9 @@ class VictimsPage(QWidget):
         super().__init__(parent)
         self._conn = conn
         self._user = session.get_current_user()
-        self._db_key = session.get_derived_key(config.HKDF_LABEL_DB)
+        self._db_key = bytearray(
+            session.get_derived_key(config.HKDF_LABEL_DB)
+        )
         self._victims: list[dict] = []
         self._posko_names: dict[int, str] = {}
 
@@ -189,6 +191,8 @@ class VictimsPage(QWidget):
 
     def refresh(self) -> None:
         """Muat daftar aman plaintext dan label posko."""
+        if not self._authorized():
+            return
         self._victims = [
             dict(row) for row in secure_store.list_victims(self._conn)
         ]
@@ -204,6 +208,10 @@ class VictimsPage(QWidget):
             self.show_detail()
 
     def _apply_filters(self) -> None:
+        if not self._authorized():
+            self._victims.clear()
+            self.table.setRowCount(0)
+            return
         query = self.search_input.text().strip().casefold()
         status = self.status_filter.currentData()
         self.table.setRowCount(0)
@@ -251,21 +259,41 @@ class VictimsPage(QWidget):
             victim.get("created_by") == self._user.get("id")
         )
 
+    def _authorized(self) -> bool:
+        """Cegah widget lama menjalankan aksi setelah sesi diblokir/logout."""
+        try:
+            current = session.get_current_user()
+            if int(current["id"]) != int(self._user["id"]):
+                raise PermissionError("Sesi pengguna telah berubah.")
+            secure_store.require_active_user(
+                self._conn, int(self._user["id"]), str(self._user["role"])
+            )
+            return True
+        except (RuntimeError, PermissionError, sqlite3.Error) as exc:
+            QMessageBox.warning(self, "Akses ditolak", str(exc))
+            return False
+
     def add_victim(self) -> None:
+        if not self._authorized():
+            return
         dialog = VictimFormDialog(
             [dict(row) for row in secure_store.list_posko(self._conn)], parent=self
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         try:
+            if not self._authorized():
+                return
             data = dialog.values()
             data["created_by"] = int(self._user["id"])
-            secure_store.add_victim(self._conn, self._db_key, data)
+            secure_store.add_victim(self._conn, bytes(self._db_key), data)
             self.refresh()
         except (ValueError, sqlite3.Error) as exc:
             QMessageBox.critical(self, "Gagal menyimpan korban", str(exc))
 
     def edit_victim(self) -> None:
+        if not self._authorized():
+            return
         victim = self._selected_victim()
         if victim is None:
             return
@@ -277,7 +305,7 @@ class VictimsPage(QWidget):
             )
             return
         detail = secure_store.get_victim(
-            self._conn, self._db_key, int(victim["id"])
+            self._conn, bytes(self._db_key), int(victim["id"])
         )
         if detail is None:
             QMessageBox.warning(self, "Data Korban", "Data korban tidak ditemukan.")
@@ -291,21 +319,25 @@ class VictimsPage(QWidget):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         try:
+            if not self._authorized():
+                return
             values = dialog.values()
             values.pop("kode_korban")
             secure_store.update_victim(
-                self._conn, self._db_key, int(victim["id"]), values
+                self._conn, bytes(self._db_key), int(victim["id"]), values
             )
             self.refresh()
         except (ValueError, sqlite3.Error) as exc:
             QMessageBox.critical(self, "Gagal memperbarui korban", str(exc))
 
     def show_detail(self) -> None:
+        if not self._authorized():
+            return
         victim = self._selected_victim()
         if victim is None:
             return
         detail = secure_store.get_victim(
-            self._conn, self._db_key, int(victim["id"])
+            self._conn, bytes(self._db_key), int(victim["id"])
         )
         if detail is None:
             QMessageBox.warning(self, "Data Korban", "Data korban tidak ditemukan.")
@@ -336,3 +368,9 @@ class VictimsPage(QWidget):
             f"Posko: {self._posko_names.get(posko_id, '-')}"
         )
         QMessageBox.information(self, "Detail Korban", "\n".join(lines))
+
+    def clear_sensitive_state(self) -> None:
+        """Overwrite the cached database key and clear decrypted victim rows."""
+        self._db_key[:] = b"\x00" * len(self._db_key)
+        self._victims.clear()
+        self.table.setRowCount(0)

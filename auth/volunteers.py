@@ -9,17 +9,18 @@ from crypto import hashing, keys
 from database import db, secure_store
 
 
-def _require_admin() -> dict[str, object]:
+def _require_admin(conn: sqlite3.Connection) -> dict[str, object]:
     """Pastikan aksi relawan berasal dari sesi admin, bukan sekadar UI tersembunyi."""
     user = session.get_current_user()
     if user.get("role") != "admin":
         raise PermissionError("Hanya admin yang dapat mengelola relawan.")
+    secure_store.require_active_user(conn, int(user["id"]), "admin")
     return user
 
 
 def list_volunteers(conn: sqlite3.Connection) -> list[dict[str, object]]:
     """Ambil profil relawan tanpa hash atau kolom kunci."""
-    _require_admin()
+    _require_admin(conn)
     return [
         dict(user)
         for user in db.list_users(conn)
@@ -29,7 +30,7 @@ def list_volunteers(conn: sqlite3.Connection) -> list[dict[str, object]]:
 
 def list_posko(conn: sqlite3.Connection) -> list[dict[str, object]]:
     """Ambil daftar posko untuk pilihan pada formulir admin."""
-    _require_admin()
+    _require_admin(conn)
     return [dict(posko) for posko in db.list_posko(conn)]
 
 
@@ -49,7 +50,7 @@ def create_volunteer(
     encoding,
 ) -> int:
     """Daftarkan relawan, wajah, dongle, dan master key dalam satu transaksi."""
-    _require_admin()
+    _require_admin(conn)
     _validate_profile(nama_lengkap, username)
     if len(password) < 8:
         raise ValueError("Password relawan minimal 8 karakter.")
@@ -110,7 +111,7 @@ def create_volunteer(
         db.log_activity(
             conn,
             "VOLUNTEER_CREATED",
-            user_id=int(_require_admin()["id"]),
+            user_id=int(_require_admin(conn)["id"]),
             detail=f"volunteer_id={user_id}",
             commit=False,
         )
@@ -134,7 +135,7 @@ def update_volunteer(
     new_password: str | None = None,
 ) -> None:
     """Edit profil relawan dan, bila diminta, reset password serta wrap key."""
-    admin = _require_admin()
+    admin = _require_admin(conn)
     _validate_profile(nama_lengkap, username)
     if new_password and len(new_password) < 8:
         raise ValueError("Password baru minimal 8 karakter.")
@@ -188,7 +189,7 @@ def set_volunteer_active(
     conn: sqlite3.Connection, user_id: int, is_active: bool
 ) -> None:
     """Aktifkan atau blokir akun relawan dan catat aksinya."""
-    admin = _require_admin()
+    admin = _require_admin(conn)
     try:
         conn.execute("BEGIN IMMEDIATE")
         row = db.get_user_by_id(conn, user_id)
@@ -218,7 +219,7 @@ def replace_volunteer_dongle(
     new_password: str,
 ) -> None:
     """Ganti dongle, set password baru, dan bungkus ulang master key."""
-    admin = _require_admin()
+    admin = _require_admin(conn)
     if len(new_password) < 8:
         raise ValueError(
             "Untuk mengganti dongle, password relawan baru minimal 8 karakter."
