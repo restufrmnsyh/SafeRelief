@@ -1,0 +1,164 @@
+"""Jendela utama SafeRelief dan gerbang dongle sebelum login."""
+
+import sqlite3
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QLabel, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
+
+from auth import dongle
+from database import db
+from ui.chat_page import ChatPage
+from ui.dashboard_page import DashboardPage
+from ui.files_page import FilesPage
+from ui.login_page import LoginPage
+from ui.photo_page import PhotoPage
+from ui.victims_page import VictimsPage
+from ui.volunteer_management_page import VolunteerManagementPage
+
+
+class MainWindow(QMainWindow):
+    """Menahan halaman login sampai dongle valid terdeteksi."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("SafeRelief")
+        self.resize(900, 650)
+        self._conn = db.get_connection()
+
+        self.pages = QStackedWidget(self)
+        self.setCentralWidget(self.pages)
+
+        self.gate_page = QWidget()
+        self.gate_page.setObjectName("dongleGatePage")
+        gate_layout = QVBoxLayout(self.gate_page)
+        self.gate_status = QLabel("Mencari dongle...")
+        self.gate_status.setObjectName("dongleStatus")
+        gate_layout.addStretch()
+        gate_layout.addWidget(self.gate_status)
+        gate_layout.addStretch()
+        self.gate_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.pages.addWidget(self.gate_page)
+
+        self.login_page = LoginPage(self._conn, self)
+        self.login_page.authenticated.connect(self._show_dashboard)
+        self.pages.addWidget(self.login_page)
+
+        self.dashboard_page: DashboardPage | None = None
+        self.victims_page: VictimsPage | None = None
+        self.volunteer_page: VolunteerManagementPage | None = None
+        self.chat_page: ChatPage | None = None
+        self.photo_page: PhotoPage | None = None
+        self.files_page: FilesPage | None = None
+
+        self.pages.setCurrentWidget(self.gate_page)
+        self._dongle_timer = QTimer(self)
+        self._dongle_timer.setInterval(2000)
+        self._dongle_timer.timeout.connect(self._check_dongle)
+        self._check_dongle()
+        self._dongle_timer.start()
+
+    def _check_dongle(self) -> None:
+        """Periksa gerbang berkala tanpa membocorkan identitas pemilik dongle."""
+        try:
+            is_valid = dongle.is_any_valid_dongle_present(self._conn)
+        except (OSError, sqlite3.Error) as exc:
+            self._show_gate(f"Gagal memeriksa dongle: {exc}")
+            return
+
+        if is_valid:
+            self.login_page.set_gate_status("Dongle valid terdeteksi")
+            if self.pages.currentWidget() is self.gate_page:
+                self.pages.setCurrentWidget(self.login_page)
+        elif self.pages.currentWidget() is not self.dashboard_page:
+            self.login_page.set_gate_status("Dongle dilepas. Mencari dongle...")
+            self._show_gate()
+
+    def _show_gate(self, message: str = "Mencari dongle...") -> None:
+        self.gate_status.setText(message)
+        self.pages.setCurrentWidget(self.gate_page)
+
+    def _show_dashboard(self, user: dict[str, object]) -> None:
+        """Tampilkan dashboard yang menyesuaikan role sesi terautentikasi."""
+        from auth import session
+
+        if user.get("id") != session.get_current_user().get("id"):
+            raise RuntimeError("Identitas dashboard tidak cocok dengan sesi aktif.")
+        if self.dashboard_page is None:
+            self.dashboard_page = DashboardPage(self._conn, self)
+            self.dashboard_page.page_requested.connect(self._open_page)
+            self.pages.addWidget(self.dashboard_page)
+        self.dashboard_page.refresh_summary()
+        self.pages.setCurrentWidget(self.dashboard_page)
+
+    def _open_page(self, page_name: str) -> None:
+        """Navigasi hanya ke halaman yang sudah diimplementasikan pada tahap ini."""
+        if self.dashboard_page is None:
+            return
+        if page_name == "victims":
+            if self.victims_page is None:
+                self.victims_page = VictimsPage(self._conn, self)
+                self.victims_page.dashboard_requested.connect(
+                    self._return_to_dashboard
+                )
+                self.pages.addWidget(self.victims_page)
+            self.victims_page.refresh()
+            self.pages.setCurrentWidget(self.victims_page)
+        elif page_name == "volunteers":
+            if self.volunteer_page is None:
+                self.volunteer_page = VolunteerManagementPage(
+                    self._conn, self
+                )
+                self.volunteer_page.dashboard_requested.connect(
+                    self._return_to_dashboard
+                )
+                self.pages.addWidget(self.volunteer_page)
+            self.volunteer_page.refresh()
+            self.pages.setCurrentWidget(self.volunteer_page)
+        elif page_name == "chat":
+            if self.chat_page is None:
+                self.chat_page = ChatPage(self._conn, self)
+                self.chat_page.dashboard_requested.connect(
+                    self._return_to_dashboard
+                )
+                self.pages.addWidget(self.chat_page)
+            self.chat_page.refresh()
+            self.pages.setCurrentWidget(self.chat_page)
+        elif page_name == "photos":
+            if self.photo_page is None:
+                self.photo_page = PhotoPage(self._conn, self)
+                self.photo_page.dashboard_requested.connect(
+                    self._return_to_dashboard
+                )
+                self.pages.addWidget(self.photo_page)
+            self.photo_page.refresh()
+            self.pages.setCurrentWidget(self.photo_page)
+        elif page_name == "files":
+            if self.files_page is None:
+                self.files_page = FilesPage(self._conn, self)
+                self.files_page.dashboard_requested.connect(
+                    self._return_to_dashboard
+                )
+                self.pages.addWidget(self.files_page)
+            self.files_page.refresh()
+            self.pages.setCurrentWidget(self.files_page)
+
+    def _return_to_dashboard(self) -> None:
+        if self.dashboard_page is not None:
+            self.dashboard_page.refresh_summary()
+            self.pages.setCurrentWidget(self.dashboard_page)
+
+    def closeEvent(self, event) -> None:
+        """Lepaskan kamera, koneksi DB, dan kunci sesi saat aplikasi ditutup."""
+        self._dongle_timer.stop()
+        self.login_page.stop_camera()
+        if self.volunteer_page is not None:
+            self.volunteer_page.stop_face_capture()
+        if self.photo_page is not None:
+            self.photo_page.stop_worker()
+        if self.files_page is not None:
+            self.files_page.stop_worker()
+        from auth import session
+
+        session.logout()
+        self._conn.close()
+        super().closeEvent(event)

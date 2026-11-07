@@ -163,6 +163,16 @@ def list_victims(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return db.list_victims_plaintext(conn)
 
 
+def get_dashboard_summary(conn: sqlite3.Connection) -> dict[str, object]:
+    """Ambil ringkasan dashboard lewat lapisan penyimpanan aplikasi."""
+    return db.get_victim_summary(conn)
+
+
+def list_posko(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Ambil daftar posko untuk tampilan aplikasi."""
+    return db.list_posko(conn)
+
+
 def _decrypt_victim_row(row: sqlite3.Row, db_key: bytes) -> dict:
     """
     Konversi Row ke dict dengan kolom *_enc terdekripsi menjadi string.
@@ -183,6 +193,8 @@ def save_face_encoding(
     db_key: bytes,
     user_id: int,
     encoding: bytes,
+    *,
+    commit: bool = True,
 ) -> None:
     """
     Enkripsi face embedding lalu simpan ke kolom face_encoding_enc.
@@ -192,7 +204,7 @@ def save_face_encoding(
                   (misal: array.tobytes() atau pickle).
     """
     encrypted = aes_module.encrypt(encoding, db_key)
-    db.update_user_face(conn, user_id, encrypted)
+    db.update_user_face(conn, user_id, encrypted, commit=commit)
 
 
 def load_face_encoding(
@@ -232,6 +244,14 @@ def save_message(
     Returns:
         id pesan baru.
     """
+    sender = db.get_user_by_id(conn, sender_id)
+    receiver = db.get_user_by_id(conn, receiver_id)
+    if sender is None or receiver is None:
+        raise ValueError("Akun percakapan tidak ditemukan.")
+    if {sender["role"], receiver["role"]} != {"admin", "relawan"}:
+        raise PermissionError("Chat hanya tersedia antara admin dan relawan.")
+    if not sender["is_active"] or not receiver["is_active"]:
+        raise PermissionError("Akun percakapan tidak aktif.")
     return db.insert_message(conn, {
         "sender_id":   sender_id,
         "receiver_id": receiver_id,
@@ -248,7 +268,129 @@ def get_messages(
     Ambil semua pesan antara dua user. Blob belum didekripsi.
     Dekripsi dilakukan di UI dengan super_encrypt.decrypt().
     """
+    sender = db.get_user_by_id(conn, user_a)
+    partner = db.get_user_by_id(conn, user_b)
+    if sender is None or partner is None:
+        raise ValueError("Akun percakapan tidak ditemukan.")
+    if {sender["role"], partner["role"]} != {"admin", "relawan"}:
+        raise PermissionError("Chat hanya tersedia antara admin dan relawan.")
     return db.get_messages_between(conn, user_a, user_b)
+
+
+def list_chat_contacts(
+    conn: sqlite3.Connection, user_id: int, role: str
+) -> list[dict[str, object]]:
+    """Kembalikan hanya kontak yang diizinkan untuk chat admin-relawan."""
+    users = [dict(row) for row in db.list_users(conn)]
+    current = next((user for user in users if user["id"] == user_id), None)
+    if current is None or current["role"] != role:
+        raise PermissionError("Identitas sesi tidak cocok dengan akun database.")
+    if role == "admin":
+        return [
+            user for user in users
+            if user["role"] == "relawan"
+        ]
+    if role == "relawan":
+        admins = [user for user in users if user["role"] == "admin"]
+        if len(admins) != 1:
+            raise ValueError("Akun admin belum tersedia.")
+        return admins
+    raise PermissionError("Peran ini tidak diizinkan menggunakan chat.")
+
+
+def list_photos(
+    conn: sqlite3.Connection, user_id: int, role: str
+) -> list[sqlite3.Row]:
+    """Admin melihat semua dokumentasi; relawan hanya melihat unggahannya."""
+    user = db.get_user_by_id(conn, user_id)
+    if user is None or user["role"] != role:
+        raise PermissionError("Identitas sesi tidak cocok dengan akun database.")
+    if role == "admin":
+        return db.list_photos(conn)
+    if role == "relawan":
+        return db.list_photos(conn, uploaded_by=user_id)
+    raise PermissionError("Peran ini tidak diizinkan melihat dokumentasi foto.")
+
+
+def save_photo(
+    conn: sqlite3.Connection,
+    *,
+    user_id: int,
+    victim_id: int | None,
+    posko_id: int | None,
+    image_path: str,
+    original_hash: str,
+    keterangan: str,
+) -> int:
+    """Simpan metadata foto setelah memastikan pengunggah adalah relawan."""
+    user = db.get_user_by_id(conn, user_id)
+    if user is None or user["role"] != "relawan":
+        raise PermissionError("Hanya relawan yang dapat mengunggah foto.")
+    return db.insert_photo(conn, {
+        "victim_id": victim_id,
+        "posko_id": posko_id,
+        "image_path": image_path,
+        "original_hash": original_hash,
+        "keterangan": keterangan,
+        "uploaded_by": user_id,
+    })
+
+
+def list_files(
+    conn: sqlite3.Connection, user_id: int, role: str
+) -> list[sqlite3.Row]:
+    """Admin melihat semua berkas; relawan hanya melihat unggahannya."""
+    user = db.get_user_by_id(conn, user_id)
+    if user is None or user["role"] != role:
+        raise PermissionError("Identitas sesi tidak cocok dengan akun database.")
+    if role == "admin":
+        return db.list_files(conn)
+    if role == "relawan":
+        return db.list_files(conn, uploader_id=user_id)
+    raise PermissionError("Peran ini tidak diizinkan melihat berkas.")
+
+
+def save_file(
+    conn: sqlite3.Connection,
+    *,
+    uploader_id: int,
+    nama_asli: str,
+    path_enc: str,
+    ukuran: int,
+    file_hash: str,
+) -> int:
+    """Simpan metadata berkas; enkripsi file dilakukan oleh lapisan UI."""
+    user = db.get_user_by_id(conn, uploader_id)
+    if user is None or user["role"] != "relawan":
+        raise PermissionError("Hanya relawan yang dapat mengunggah berkas.")
+    return db.insert_file(conn, {
+        "uploader_id": uploader_id,
+        "nama_asli": nama_asli,
+        "path_enc": path_enc,
+        "ukuran": ukuran,
+        "file_hash": file_hash,
+    })
+
+
+def get_file_for_admin(
+    conn: sqlite3.Connection, user_id: int, file_id: int
+) -> Optional[sqlite3.Row]:
+    """Hanya admin boleh memperoleh metadata berkas untuk proses dekripsi."""
+    user = db.get_user_by_id(conn, user_id)
+    if user is None or user["role"] != "admin":
+        raise PermissionError("Hanya admin yang dapat mengunduh berkas.")
+    return db.get_file_by_id(conn, file_id)
+
+
+def log_activity(
+    conn: sqlite3.Connection,
+    action: str,
+    *,
+    user_id: int,
+    detail: str | None = None,
+) -> None:
+    """Catat event UI melalui API penyimpanan tanpa menulis SQL di halaman."""
+    db.log_activity(conn, action, user_id=user_id, detail=detail)
 
 
 # ──────────────────────────────────────────────────────────────────────

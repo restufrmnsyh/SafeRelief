@@ -188,14 +188,62 @@ def update_user_face(
 
 
 def update_user_active(
-    conn: sqlite3.Connection, user_id: int, is_active: int
+    conn: sqlite3.Connection,
+    user_id: int,
+    is_active: int,
+    *,
+    commit: bool = True,
 ) -> None:
     """Aktifkan (1) atau blokir (0) akun user."""
     conn.execute(
         "UPDATE users SET is_active = ? WHERE id = ?",
         (is_active, user_id),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
+
+
+def update_user_profile(
+    conn: sqlite3.Connection,
+    user_id: int,
+    nama_lengkap: str,
+    username: str,
+    posko_id: int | None,
+    *,
+    commit: bool = True,
+) -> None:
+    """Perbarui profil dasar relawan tanpa menyentuh role atau rahasia."""
+    conn.execute(
+        """
+        UPDATE users SET nama_lengkap = ?, username = ?, posko_id = ?
+        WHERE id = ? AND role = 'relawan'
+        """,
+        (nama_lengkap, username, posko_id, user_id),
+    )
+    if commit:
+        conn.commit()
+
+
+def update_user_credentials(
+    conn: sqlite3.Connection,
+    user_id: int,
+    password_hash: str,
+    wrapped_master_key: bytes,
+    kdf_salt: bytes,
+    *,
+    commit: bool = True,
+) -> None:
+    """Perbarui hash password dan master key yang dibungkus secara atomik."""
+    conn.execute(
+        """
+        UPDATE users
+        SET password_hash = ?, wrapped_master_key = ?, kdf_salt = ?
+        WHERE id = ? AND role = 'relawan'
+        """,
+        (password_hash, wrapped_master_key, kdf_salt, user_id),
+    )
+    if commit:
+        conn.commit()
 
 
 def list_users(conn: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -327,6 +375,26 @@ def list_victims_plaintext(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return cur.fetchall()
 
 
+def get_victim_summary(conn: sqlite3.Connection) -> dict[str, object]:
+    """Ambil jumlah korban per status dan per posko untuk dashboard."""
+    status_rows = conn.execute(
+        "SELECT status, COUNT(*) AS total FROM victims GROUP BY status"
+    ).fetchall()
+    posko_rows = conn.execute(
+        """
+        SELECT p.id AS posko_id, p.nama AS nama_posko, COUNT(v.id) AS total
+        FROM posko AS p
+        LEFT JOIN victims AS v ON v.posko_id = p.id
+        GROUP BY p.id, p.nama
+        ORDER BY p.nama
+        """
+    ).fetchall()
+    return {
+        "by_status": {row["status"]: row["total"] for row in status_rows},
+        "by_posko": [dict(row) for row in posko_rows],
+    }
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Photos
 # ──────────────────────────────────────────────────────────────────────
@@ -354,6 +422,20 @@ def list_photos_by_victim(conn: sqlite3.Connection, victim_id: int) -> list[sqli
     cur = conn.execute(
         "SELECT * FROM photos WHERE victim_id = ? ORDER BY id", (victim_id,)
     )
+    return cur.fetchall()
+
+
+def list_photos(
+    conn: sqlite3.Connection, uploaded_by: Optional[int] = None
+) -> list[sqlite3.Row]:
+    """Daftar foto, opsional dibatasi pada relawan pengunggah."""
+    if uploaded_by is None:
+        cur = conn.execute("SELECT * FROM photos ORDER BY id DESC")
+    else:
+        cur = conn.execute(
+            "SELECT * FROM photos WHERE uploaded_by = ? ORDER BY id DESC",
+            (uploaded_by,),
+        )
     return cur.fetchall()
 
 
@@ -422,8 +504,16 @@ def insert_file(conn: sqlite3.Connection, data: dict) -> int:
     return cur.lastrowid
 
 
-def list_files(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    cur = conn.execute("SELECT * FROM files ORDER BY id")
+def list_files(
+    conn: sqlite3.Connection, uploader_id: Optional[int] = None
+) -> list[sqlite3.Row]:
+    if uploader_id is None:
+        cur = conn.execute("SELECT * FROM files ORDER BY id DESC")
+    else:
+        cur = conn.execute(
+            "SELECT * FROM files WHERE uploader_id = ? ORDER BY id DESC",
+            (uploader_id,),
+        )
     return cur.fetchall()
 
 

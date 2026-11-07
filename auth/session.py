@@ -88,3 +88,18 @@ def logout() -> None:
 def is_logged_in() -> bool:
     """Periksa apakah aplikasi memiliki sesi aktif."""
     return _active_session.is_logged_in()
+
+
+def get_current_user() -> dict[str, object]:
+    """Kembalikan identitas sesi aktif tanpa mengekspos objek state internal."""
+    if _active_session.user is None:
+        raise RuntimeError("Tidak ada sesi login aktif.")
+    return dict(_active_session.user)
+
+
+def get_master_key() -> bytes:
+    """Kembalikan salinan master key hanya untuk operasi kriptografi sesi."""
+    master_key = _active_session.master_key
+    if master_key is None:
+        raise RuntimeError("Tidak ada sesi login aktif.")
+    return master_key

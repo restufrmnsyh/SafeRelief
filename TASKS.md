@@ -49,15 +49,15 @@ Kerjakan berurutan dan uji manual tiap sub-tahap.
 
 ## Tahap 5: UI PySide6
 Satu halaman per sesi. UI hanya memanggil `secure_store`/`auth`, tanpa SQL.
-- [ ] 5.1 Jendela utama + gerbang dongle (`QStackedWidget`, `QTimer` 2 detik)
-- [ ] 5.2 Login (form + kamera di `QThread`)
-- [ ] 5.3 Dashboard (menu menyesuaikan peran)
-- [ ] 5.4 Data korban (tabel, cari, filter, tambah/edit/detail)
-- [ ] 5.5 Chat (ciphertext di inbox, tombol Decrypt satu klik dengan kunci Vigenère otomatis, kotak opsional "kunci Vigenère manual" untuk demo)
-- [ ] 5.6 Dokumentasi foto (sisipkan dan ekstrak)
-- [ ] 5.7 Berkas laporan (unggah, daftar, dekripsi/unduh)
+- [x] 5.1 Jendela utama + gerbang dongle (`QStackedWidget`, `QTimer` 2 detik)
+- [x] 5.2 Login (form + kamera di `QThread`)
+- [x] 5.3 Dashboard (menu menyesuaikan peran)
+- [x] 5.4 Data korban (tabel, cari, filter, tambah/edit/detail)
+- [x] 5.5 Chat (ciphertext di inbox, tombol Decrypt satu klik dengan kunci Vigenère otomatis, kotak opsional "kunci Vigenère manual" untuk demo)
+- [x] 5.6 Dokumentasi foto (sisipkan dan ekstrak)
+- [x] 5.7 Berkas laporan (unggah, daftar, dekripsi/unduh)
 - [ ] 5.8 Distribusi bantuan (catat, riwayat, Validasi Chain, Simulasi Tampering)
-- [ ] 5.9 Manajemen relawan (admin: buat, edit, aktif/blokir, daftar wajah, daftar/ganti dongle; ganti dongle dan reset password membungkus ulang master key)
+- [x] 5.9 Manajemen relawan (admin: buat, edit, aktif/blokir, daftar wajah, daftar/ganti dongle; ganti dongle dan reset password membungkus ulang master key)
 - [ ] 5.10 Log aktivitas (admin)
 - [ ] 5.11 Panel Demo: ciphertext vs plaintext berdampingan
 - **Lulus:** tiap halaman bisa dipakai tanpa error dan UI tidak membeku.
