@@ -1,0 +1,3 @@
+"""
+Test suite untuk SafeRelief.
+"""

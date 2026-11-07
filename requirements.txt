@@ -1,0 +1,26 @@
+# SafeRelief Dependencies
+# Python 3.11 atau 3.12
+
+# UI Desktop
+PySide6>=6.5.0
+
+# Kriptografi Modern
+cryptography>=41.0.0
+argon2-cffi>=23.1.0
+pycryptodome>=3.19.0
+
+# Computer Vision (Wajah)
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# Steganografi
+Pillow>=10.0.0
+
+# Dongle Detection
+psutil>=5.9.0
+
+# Testing
+pytest>=7.4.0
+
+# Optional: Material Theme untuk Qt
+qt-material>=2.14
