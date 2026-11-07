@@ -166,6 +166,8 @@ def provision_dongle(
     conn: sqlite3.Connection,
     drive: str,
     user_id: int,
+    *,
+    commit: bool = True,
 ) -> bytes:
     """
     Provisi dongle untuk user: generate token, tulis ke drive, simpan ke DB.
@@ -222,6 +224,7 @@ def provision_dongle(
         dongle_token_hash=token_hash,
         wrapped_master_key=None,   # diisi oleh setup_admin / wrap ulang
         kdf_salt=None,
+        commit=commit,
     )
 
     return token

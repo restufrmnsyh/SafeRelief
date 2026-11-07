@@ -39,11 +39,11 @@ Rujukan rancangan: `AGENTS.md`.
 
 ## Tahap 4: Autentikasi
 Kerjakan berurutan dan uji manual tiap sub-tahap.
-- [ ] 4a `auth/login.py`: verifikasi password, hitung gagal, kunci akun, cek `is_active`, catat log
-- [ ] 4b `auth/dongle.py`: find_removable_drives, get_volume_serial, provision_dongle, verify_dongle
-- [ ] 4c `auth/face_auth.py` + skrip uji CLI webcam (unduh model YuNet dan SFace ke `models/`)
-- [ ] 4d `auth/session.py`: simpan user aktif + master key di memori, clear saat logout
-- [ ] 4e `setup_admin.py` (atomik, menolak jika admin ada, membuat master key terbungkus dan `recovery.key`)
+- [x] 4a `auth/login.py`: verifikasi password, hitung gagal, kunci akun, cek `is_active`, catat log
+- [x] 4b `auth/dongle.py`: find_removable_drives, get_volume_serial, provision_dongle, verify_dongle
+- [x] 4c `auth/face_auth.py` + skrip uji CLI webcam (unduh model YuNet dan SFace ke `models/`)
+- [x] 4d `auth/session.py`: simpan user aktif + master key di memori, clear saat logout
+- [x] 4e `setup_admin.py` (atomik, menolak jika admin ada, membuat master key terbungkus dan `recovery.key`)
 - [ ] 4f `reset_admin.py` (opsional): pemulihan lewat `recovery.key`
 - **Lulus:** master key hanya terbuka jika dongle dan password benar; wajah sendiri lolos, wajah orang lain ditolak; dongle orang lain ditolak; 3x salah password mengunci akun; `setup_admin.py` kedua kali menolak jalan.
 

@@ -73,7 +73,9 @@ def init_db(path: Optional[str | Path] = None) -> None:
 # Users
 # ──────────────────────────────────────────────────────────────────────
 
-def insert_user(conn: sqlite3.Connection, data: dict) -> int:
+def insert_user(
+    conn: sqlite3.Connection, data: dict, *, commit: bool = True
+) -> int:
     """
     Sisipkan user baru. Mengembalikan id yang baru dibuat.
 
@@ -106,8 +108,15 @@ def insert_user(conn: sqlite3.Connection, data: dict) -> int:
             data.get("kdf_salt"),
         ),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return cur.lastrowid
+
+
+def count_admins(conn: sqlite3.Connection) -> int:
+    """Hitung admin yang sudah terdaftar untuk menjaga bootstrap satu kali."""
+    cur = conn.execute("SELECT COUNT(*) FROM users WHERE role = ?", ("admin",))
+    return cur.fetchone()[0]
 
 
 def get_user_by_username(conn: sqlite3.Connection, username: str) -> Optional[sqlite3.Row]:
@@ -145,6 +154,8 @@ def update_user_dongle(
     dongle_token_hash: Optional[str],
     wrapped_master_key: Optional[bytes],
     kdf_salt: Optional[bytes],
+    *,
+    commit: bool = True,
 ) -> None:
     """Update data dongle dan wrapped master key setelah provision/ganti dongle."""
     conn.execute(
@@ -156,18 +167,24 @@ def update_user_dongle(
         """,
         (dongle_serial, dongle_token_hash, wrapped_master_key, kdf_salt, user_id),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def update_user_face(
-    conn: sqlite3.Connection, user_id: int, face_encoding_enc: bytes
+    conn: sqlite3.Connection,
+    user_id: int,
+    face_encoding_enc: bytes,
+    *,
+    commit: bool = True,
 ) -> None:
     """Simpan embedding wajah terenkripsi."""
     conn.execute(
         "UPDATE users SET face_encoding_enc = ? WHERE id = ?",
         (face_encoding_enc, user_id),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def update_user_active(
@@ -489,6 +506,8 @@ def log_activity(
     aksi: str,
     user_id: Optional[int] = None,
     detail: Optional[str] = None,
+    *,
+    commit: bool = True,
 ) -> None:
     """
     Catat event penting ke activity_log.
@@ -502,7 +521,8 @@ def log_activity(
         "INSERT INTO activity_log (user_id, aksi, detail) VALUES (?, ?, ?)",
         (user_id, aksi, detail),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def list_activity_log(conn: sqlite3.Connection, limit: int = 200) -> list[sqlite3.Row]:
