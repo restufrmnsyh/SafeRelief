@@ -82,13 +82,22 @@ ARGON2_MEMORY_COST = 102400
 ARGON2_PARALLELISM = 8
 
 # ===== Scrypt Parameters =====
-# Parameter untuk derive KEK (Key Encrypting Key)
+# Parameter untuk derive KEK (Key Encrypting Key) saat login
 # n: CPU/memory cost (2^14 = 16384)
 # r: block size (8)
 # p: parallelization (1)
 SCRYPT_N = 16384
 SCRYPT_R = 8
 SCRYPT_P = 1
+
+# Parameter Scrypt khusus untuk file recovery
+# Lebih berat dari login (2^17 = 131072) karena:
+# - Dipakai sangat jarang (hanya saat disaster recovery)
+# - Melindungi master key tanpa faktor dongle (hanya password)
+# - Overhead waktu (~10 detik) tidak masalah untuk kasus darurat
+RECOVERY_SCRYPT_N = 2**17  # 131072
+RECOVERY_SCRYPT_R = 8
+RECOVERY_SCRYPT_P = 1
 
 # ===== UI =====
 # Window size
