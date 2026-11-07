@@ -56,10 +56,10 @@ Satu halaman per sesi. UI hanya memanggil `secure_store`/`auth`, tanpa SQL.
 - [x] 5.5 Chat (ciphertext di inbox, tombol Decrypt satu klik dengan kunci Vigenère otomatis, kotak opsional "kunci Vigenère manual" untuk demo)
 - [x] 5.6 Dokumentasi foto (sisipkan dan ekstrak)
 - [x] 5.7 Berkas laporan (unggah, daftar, dekripsi/unduh)
-- [ ] 5.8 Distribusi bantuan (catat, riwayat, Validasi Chain, Simulasi Tampering)
+- [x] 5.8 Distribusi bantuan (catat, riwayat, Validasi Chain, Simulasi Tampering)
 - [x] 5.9 Manajemen relawan (admin: buat, edit, aktif/blokir, daftar wajah, daftar/ganti dongle; ganti dongle dan reset password membungkus ulang master key)
-- [ ] 5.10 Log aktivitas (admin)
-- [ ] 5.11 Panel Demo: ciphertext vs plaintext berdampingan
+- [x] 5.10 Log aktivitas (admin)
+- [x] 5.11 Panel Demo: ciphertext vs plaintext berdampingan
 - **Lulus:** tiap halaman bisa dipakai tanpa error dan UI tidak membeku.
 
 ## Tahap 6: Integrasi

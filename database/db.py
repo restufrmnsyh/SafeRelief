@@ -471,6 +471,31 @@ def get_messages_between(
     return cur.fetchall()
 
 
+def list_messages_for_user(
+    conn: sqlite3.Connection, user_id: int
+) -> list[sqlite3.Row]:
+    """Ambil pesan yang dikirim atau diterima user untuk panel demonstrasi."""
+    cur = conn.execute(
+        """
+        SELECT * FROM messages
+        WHERE sender_id = ? OR receiver_id = ?
+        ORDER BY id DESC
+        """,
+        (user_id, user_id),
+    )
+    return cur.fetchall()
+
+
+def get_message_by_id(
+    conn: sqlite3.Connection, message_id: int
+) -> Optional[sqlite3.Row]:
+    """Ambil satu pesan terenkripsi untuk tampilan demo."""
+    cur = conn.execute(
+        "SELECT * FROM messages WHERE id = ?", (message_id,)
+    )
+    return cur.fetchone()
+
+
 def mark_messages_read(
     conn: sqlite3.Connection, receiver_id: int, sender_id: int
 ) -> None:
@@ -559,6 +584,22 @@ def save_block(conn: sqlite3.Connection, block_dict: dict) -> None:
     conn.commit()
 
 
+def update_block_data_for_demo(
+    conn: sqlite3.Connection, index: int, data: dict
+) -> None:
+    """Ubah payload block tanpa hash hanya untuk demonstrasi tampering."""
+    cursor = conn.execute(
+        "UPDATE blockchain SET data = ? WHERE idx = ?",
+        (
+            json.dumps(data, sort_keys=True, separators=(",", ":")),
+            index,
+        ),
+    )
+    if cursor.rowcount == 0:
+        raise ValueError(f"Block {index} tidak ditemukan.")
+    conn.commit()
+
+
 def load_chain(conn: sqlite3.Connection) -> list[dict]:
     """
     Muat seluruh chain dari DB, urut berdasarkan idx.
@@ -615,9 +656,32 @@ def log_activity(
         conn.commit()
 
 
-def list_activity_log(conn: sqlite3.Connection, limit: int = 200) -> list[sqlite3.Row]:
-    """Ambil entri log terbaru, terbatas `limit` baris."""
-    cur = conn.execute(
-        "SELECT * FROM activity_log ORDER BY id DESC LIMIT ?", (limit,)
-    )
+def list_activity_log(
+    conn: sqlite3.Connection,
+    limit: int = 200,
+    user_id: int | None = None,
+    action: str | None = None,
+) -> list[sqlite3.Row]:
+    """Ambil log terbaru, dengan filter user dan/atau aksi bila diminta."""
+    if limit <= 0:
+        raise ValueError("Batas log harus lebih besar dari nol.")
+    query = "SELECT * FROM activity_log WHERE 1 = 1"
+    parameters: list[object] = []
+    if user_id is not None:
+        query += " AND user_id = ?"
+        parameters.append(user_id)
+    if action:
+        query += " AND aksi = ?"
+        parameters.append(action)
+    query += " ORDER BY id DESC LIMIT ?"
+    parameters.append(limit)
+    cur = conn.execute(query, parameters)
     return cur.fetchall()
+
+
+def list_activity_actions(conn: sqlite3.Connection) -> list[str]:
+    """Aksi unik yang tersedia sebagai opsi filter log."""
+    cur = conn.execute(
+        "SELECT DISTINCT aksi FROM activity_log ORDER BY aksi"
+    )
+    return [str(row["aksi"]) for row in cur.fetchall()]

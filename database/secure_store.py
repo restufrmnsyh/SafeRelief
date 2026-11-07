@@ -14,14 +14,14 @@ Prinsip desain:
   dilakukan lewat database.db. TIDAK pernah membuat genesis baru jika
   tabel blockchain sudah berisi baris.
 - Pesan chat disimpan sebagai SATU BLOB utuh dari crypto.super_encrypt;
-  modul ini hanya menyimpan/mengambil blob — enkripsi/dekripsi pesan
-  dilakukan oleh pemanggil dengan super_encrypt.
+  inbox mengenkripsi/dekripsi di lapisan pemanggil, sementara helper
+  panel demo memastikan izin sebelum menampilkan plaintext pesan.
 """
 
 import sqlite3
 from typing import Optional
 
-from crypto import aes_module
+from crypto import aes_module, super_encrypt
 from crypto.blockchain import Blockchain
 from database import db
 
@@ -392,6 +392,161 @@ def log_activity(
     """Catat event UI melalui API penyimpanan tanpa menulis SQL di halaman."""
     db.log_activity(conn, action, user_id=user_id, detail=detail)
 
+
+def _require_active_user(
+    conn: sqlite3.Connection, user_id: int, role: str | None = None
+) -> sqlite3.Row:
+    """Pastikan identitas sesi merujuk akun aktif sebelum layanan sensitif."""
+    user = db.get_user_by_id(conn, user_id)
+    if user is None or not user["is_active"]:
+        raise PermissionError("Akun tidak ditemukan atau tidak aktif.")
+    if role is not None and user["role"] != role:
+        raise PermissionError("Peran akun tidak diizinkan untuk tindakan ini.")
+    return user
+
+
+def list_activity_users(
+    conn: sqlite3.Connection, requester_id: int
+) -> list[dict[str, object]]:
+    """Daftar user aman untuk filter log, hanya tersedia bagi admin."""
+    _require_active_user(conn, requester_id, "admin")
+    return [
+        dict(row)
+        for row in db.list_users(conn)
+    ]
+
+
+def list_activity_actions(
+    conn: sqlite3.Connection, requester_id: int
+) -> list[str]:
+    """Daftar opsi filter aksi, hanya tersedia bagi admin."""
+    _require_active_user(conn, requester_id, "admin")
+    return db.list_activity_actions(conn)
+
+
+def list_activity_log(
+    conn: sqlite3.Connection,
+    requester_id: int,
+    *,
+    user_id: int | None = None,
+    action: str | None = None,
+    limit: int = 500,
+) -> list[sqlite3.Row]:
+    """Ambil log terbaru dan filter server-side setelah otorisasi admin."""
+    _require_active_user(conn, requester_id, "admin")
+    if user_id is not None:
+        if db.get_user_by_id(conn, user_id) is None:
+            raise ValueError("User filter tidak ditemukan.")
+    return db.list_activity_log(
+        conn, limit=limit, user_id=user_id, action=action
+    )
+
+
+def get_aid_chain(
+    conn: sqlite3.Connection, user_id: int, role: str
+) -> Blockchain:
+    """Muat riwayat bantuan untuk admin dan relawan aktif."""
+    _require_active_user(conn, user_id, role)
+    if role not in ("admin", "relawan"):
+        raise PermissionError("Peran ini tidak diizinkan melihat riwayat bantuan.")
+    return load_blockchain(conn)
+
+
+def append_aid_block(
+    conn: sqlite3.Connection, user_id: int, data: dict
+) -> None:
+    """Catat distribusi bantuan hanya jika pemanggil adalah admin aktif."""
+    _require_active_user(conn, user_id, "admin")
+    required = ("jenis", "jumlah", "dari", "ke", "petugas")
+    if any(key not in data for key in required):
+        raise ValueError("Data distribusi belum lengkap.")
+    if not isinstance(data["jumlah"], int) or isinstance(data["jumlah"], bool):
+        raise ValueError("Jumlah bantuan harus bilangan bulat.")
+    if data["jumlah"] <= 0:
+        raise ValueError("Jumlah bantuan harus lebih besar dari nol.")
+    chain = get_or_create_chain(conn)
+    if not chain.is_valid()[0]:
+        raise ValueError("Chain tidak valid; distribusi baru tidak dapat dicatat.")
+    append_block(conn, data)
+    db.log_activity(
+        conn,
+        "AID_DISTRIBUTION_RECORDED",
+        user_id=user_id,
+        detail=f"jenis={data['jenis']}; jumlah={data['jumlah']}",
+    )
+
+
+def simulate_aid_tampering(
+    conn: sqlite3.Connection, user_id: int, block_index: int
+) -> int:
+    """Ubah jumlah di block non-genesis tanpa hash untuk demo admin saja."""
+    _require_active_user(conn, user_id, "admin")
+    if block_index <= 0:
+        raise ValueError("Genesis block tidak boleh dipilih untuk simulasi.")
+    chain = load_blockchain(conn)
+    if block_index >= len(chain.chain):
+        raise ValueError("Block yang dipilih tidak ditemukan.")
+    block = chain.chain[block_index]
+    amount = block.data.get("jumlah")
+    if not isinstance(amount, int) or isinstance(amount, bool):
+        raise ValueError("Block tidak memiliki jumlah numerik untuk diubah.")
+
+    changed_data = dict(block.data)
+    changed_data["jumlah"] = amount + 1
+    db.update_block_data_for_demo(conn, block_index, changed_data)
+    db.log_activity(
+        conn,
+        "DEMO_AID_TAMPERING",
+        user_id=user_id,
+        detail=f"block_index={block_index}",
+    )
+    return block_index
+
+
+def list_demo_victims(
+    conn: sqlite3.Connection, user_id: int
+) -> list[sqlite3.Row]:
+    """Daftar korban aman untuk demo ciphertext/plaintext bagi user aktif."""
+    _require_active_user(conn, user_id)
+    return db.list_victims_plaintext(conn)
+
+
+def list_demo_messages(
+    conn: sqlite3.Connection, user_id: int
+) -> list[sqlite3.Row]:
+    """Daftar pesan yang melibatkan user aktif untuk panel demonstrasi."""
+    _require_active_user(conn, user_id)
+    return db.list_messages_for_user(conn, user_id)
+
+
+def decrypt_demo_message(
+    conn: sqlite3.Connection,
+    user_id: int,
+    message_id: int,
+    *,
+    vigenere_key: str,
+    blowfish_enc_key: bytes,
+    blowfish_mac_key: bytes,
+) -> str:
+    """Dekripsi hanya pesan milik percakapan admin-relawan yang requester ikuti."""
+    requester = _require_active_user(conn, user_id)
+    message = db.get_message_by_id(conn, message_id)
+    if message is None:
+        raise ValueError("Pesan demonstrasi tidak ditemukan.")
+    if user_id not in (message["sender_id"], message["receiver_id"]):
+        raise PermissionError("Pesan bukan bagian dari percakapan user aktif.")
+    sender = _require_active_user(conn, int(message["sender_id"]))
+    receiver = _require_active_user(conn, int(message["receiver_id"]))
+    if {sender["role"], receiver["role"]} != {"admin", "relawan"}:
+        raise PermissionError("Chat hanya tersedia antara admin dan relawan.")
+    if requester["role"] not in ("admin", "relawan"):
+        raise PermissionError("Peran ini tidak diizinkan melihat chat.")
+    return super_encrypt.decrypt(
+        bytes(message["ciphertext"]),
+        vigenere_key,
+        blowfish_enc_key,
+        blowfish_mac_key,
+    )
 
 # ──────────────────────────────────────────────────────────────────────
 # Blockchain

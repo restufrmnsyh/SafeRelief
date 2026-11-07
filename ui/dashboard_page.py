@@ -58,13 +58,14 @@ class DashboardPage(QWidget):
             self._add_menu("Chat Koordinasi", "chat")
             self._add_menu("Dokumentasi Foto", "photos")
             self._add_menu("Berkas Laporan", "files")
-            self._add_menu("Log Aktivitas", None)
-            self._add_menu("Distribusi Bantuan", None)
+            self._add_menu("Log Aktivitas", "activity")
+            self._add_menu("Distribusi Bantuan", "aid")
+            self._add_menu("Panel Demo", "demo")
         else:
             self._add_menu("Chat Koordinasi", "chat")
             self._add_menu("Dokumentasi Foto", "photos")
             self._add_menu("Berkas Laporan", "files")
-            self._add_menu("Riwayat Bantuan", None)
+            self._add_menu("Riwayat Bantuan", "aid")
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.welcome_label)

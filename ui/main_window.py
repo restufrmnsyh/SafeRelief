@@ -7,8 +7,11 @@ from PySide6.QtWidgets import QLabel, QMainWindow, QStackedWidget, QVBoxLayout, 
 
 from auth import dongle
 from database import db
+from ui.activity_log_page import ActivityLogPage
+from ui.aid_page import AidPage
 from ui.chat_page import ChatPage
 from ui.dashboard_page import DashboardPage
+from ui.demo_panel_page import DemoPanelPage
 from ui.files_page import FilesPage
 from ui.login_page import LoginPage
 from ui.photo_page import PhotoPage
@@ -49,6 +52,9 @@ class MainWindow(QMainWindow):
         self.chat_page: ChatPage | None = None
         self.photo_page: PhotoPage | None = None
         self.files_page: FilesPage | None = None
+        self.aid_page: AidPage | None = None
+        self.activity_log_page: ActivityLogPage | None = None
+        self.demo_panel_page: DemoPanelPage | None = None
 
         self.pages.setCurrentWidget(self.gate_page)
         self._dongle_timer = QTimer(self)
@@ -93,6 +99,18 @@ class MainWindow(QMainWindow):
     def _open_page(self, page_name: str) -> None:
         """Navigasi hanya ke halaman yang sudah diimplementasikan pada tahap ini."""
         if self.dashboard_page is None:
+            return
+        from auth import session
+
+        role = session.get_current_user().get("role")
+        allowed_pages = {
+            "admin": {
+                "victims", "volunteers", "chat", "photos", "files",
+                "aid", "activity", "demo",
+            },
+            "relawan": {"victims", "chat", "photos", "files", "aid"},
+        }
+        if page_name not in allowed_pages.get(str(role), set()):
             return
         if page_name == "victims":
             if self.victims_page is None:
@@ -141,6 +159,33 @@ class MainWindow(QMainWindow):
                 self.pages.addWidget(self.files_page)
             self.files_page.refresh()
             self.pages.setCurrentWidget(self.files_page)
+        elif page_name == "aid":
+            if self.aid_page is None:
+                self.aid_page = AidPage(self._conn, self)
+                self.aid_page.dashboard_requested.connect(
+                    self._return_to_dashboard
+                )
+                self.pages.addWidget(self.aid_page)
+            self.aid_page.refresh()
+            self.pages.setCurrentWidget(self.aid_page)
+        elif page_name == "activity":
+            if self.activity_log_page is None:
+                self.activity_log_page = ActivityLogPage(self._conn, self)
+                self.activity_log_page.dashboard_requested.connect(
+                    self._return_to_dashboard
+                )
+                self.pages.addWidget(self.activity_log_page)
+            self.activity_log_page.refresh()
+            self.pages.setCurrentWidget(self.activity_log_page)
+        elif page_name == "demo":
+            if self.demo_panel_page is None:
+                self.demo_panel_page = DemoPanelPage(self._conn, self)
+                self.demo_panel_page.dashboard_requested.connect(
+                    self._return_to_dashboard
+                )
+                self.pages.addWidget(self.demo_panel_page)
+            self.demo_panel_page.refresh_records()
+            self.pages.setCurrentWidget(self.demo_panel_page)
 
     def _return_to_dashboard(self) -> None:
         if self.dashboard_page is not None:
