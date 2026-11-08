@@ -202,10 +202,7 @@ def provision_dongle(
     serial = get_volume_serial(drive)
 
     # 3. Cek apakah serial sudah dipakai user LAIN
-    cur = conn.execute(
-        "SELECT id FROM users WHERE dongle_serial = ?", (serial,)
-    )
-    existing = cur.fetchone()
+    existing = db.get_user_by_dongle_serial(conn, serial)
     if existing and existing["id"] != user_id:
         raise ValueError(
             f"Serial dongle '{serial}' sudah dipakai akun lain. "
@@ -324,11 +321,7 @@ def is_any_valid_dongle_present(conn: sqlite3.Connection) -> bool:
             continue
 
         # Cari user dengan serial ini
-        cur = conn.execute(
-            "SELECT dongle_token_hash FROM users WHERE dongle_serial = ?",
-            (serial,)
-        )
-        row = cur.fetchone()
+        row = db.get_user_by_dongle_serial(conn, serial)
         if row is None:
             continue
 

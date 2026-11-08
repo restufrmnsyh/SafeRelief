@@ -133,6 +133,16 @@ def get_user_by_id(conn: sqlite3.Connection, user_id: int) -> Optional[sqlite3.R
     return cur.fetchone()
 
 
+def get_user_by_dongle_serial(
+    conn: sqlite3.Connection, serial: str
+) -> Optional[sqlite3.Row]:
+    """Cari user yang terdaftar dengan serial dongle tersebut."""
+    cur = conn.execute(
+        "SELECT * FROM users WHERE dongle_serial = ?", (serial,)
+    )
+    return cur.fetchone()
+
+
 def update_user_login_attempt(
     conn: sqlite3.Connection,
     user_id: int,
