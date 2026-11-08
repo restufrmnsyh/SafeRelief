@@ -520,8 +520,8 @@ def decrypt_demo_message(
     message_id: int,
     *,
     vigenere_key: str,
-    blowfish_enc_key: bytes,
-    blowfish_mac_key: bytes,
+    vernam_enc_key: bytes,
+    vernam_mac_key: bytes,
 ) -> str:
     """Dekripsi hanya pesan milik percakapan admin-relawan yang requester ikuti."""
     requester = require_active_user(conn, user_id, "admin")
@@ -537,8 +537,8 @@ def decrypt_demo_message(
     return super_encrypt.decrypt(
         bytes(message["ciphertext"]),
         vigenere_key,
-        blowfish_enc_key,
-        blowfish_mac_key,
+        vernam_enc_key,
+        vernam_mac_key,
     )
 
 # ──────────────────────────────────────────────────────────────────────

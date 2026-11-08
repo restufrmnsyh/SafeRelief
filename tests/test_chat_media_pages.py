@@ -121,6 +121,30 @@ def test_chat_sends_ciphertext_and_decrypts_only_on_request(media_context, qapp)
     qapp.processEvents()
 
 
+def test_chat_rejects_utf8_message_over_vernam_byte_limit(
+    media_context, monkeypatch: pytest.MonkeyPatch, qapp
+):
+    conn, _admin_id, volunteer_id, *_ = media_context
+    page = ChatPage(conn)
+    warnings = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda _parent, _title, text: warnings.append(text),
+    )
+    oversized_message = "🙂" * 2041
+    assert len(oversized_message) < config.VERNAM_MAX_MESSAGE_BYTES
+    assert len(oversized_message.encode("utf-8")) > config.VERNAM_MAX_MESSAGE_BYTES
+    page.message_input.setPlainText(oversized_message)
+
+    page.send_message()
+
+    assert secure_store.get_messages(conn, volunteer_id, int(page.contact_input.currentData())) == []
+    assert warnings and "8160 byte" in warnings[0]
+    page.deleteLater()
+    qapp.processEvents()
+
+
 def test_photo_page_embeds_encrypted_metadata_and_admin_extracts(
     media_context, tmp_path: Path, qapp
 ):

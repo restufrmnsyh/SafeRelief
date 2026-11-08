@@ -8,12 +8,12 @@ Rujukan rancangan: `AGENTS.md`.
 - [ ] `requirements.txt` sesuai daftar dependensi
 - [ ] `.gitignore` (venv, data/, storage/, __pycache__, *.db, *.enc)
 - [ ] `config.py`: path DB, folder storage, difficulty blockchain, threshold wajah, durasi kunci akun
-- **Lulus:** `python -c "import PySide6, cryptography, argon2, Crypto, cv2, PIL, psutil; print('OK')"` mencetak `OK`
+- **Lulus:** `python -c "import PySide6, cryptography, argon2, cv2, PIL, psutil; print('OK')"` mencetak `OK`
 
 ## Tahap 1: Modul kripto dasar
 - [ ] `crypto/vigenere.py` (ASCII 32-126)
 - [ ] `crypto/aes_module.py` (AES-256-GCM, nonce+ct+tag)
-- [ ] `crypto/blowfish_module.py` (CBC + HMAC encrypt-then-MAC)
+- [ ] `crypto/vernam_module.py` (XOR dengan keystream HKDF-SHA256 + HMAC)
 - [ ] `crypto/chacha_module.py` (bytes dan file)
 - [ ] `crypto/hashing.py` (Argon2, SHA-256)
 - [ ] `crypto/keys.py` (HKDF label db/chat-enc/chat-mac/file/stego/vigenere; `derive_vigenere_key` menghasilkan 16 karakter ASCII 32-126; Scrypt KEK dari password + token dongle; wrap/unwrap master key; buat dan buka file pemulihan)

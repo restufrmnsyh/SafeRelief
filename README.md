@@ -6,7 +6,7 @@ Aplikasi desktop untuk komunitas relawan bencana alam dengan keamanan kriptograf
 
 SafeRelief adalah aplikasi desktop Windows yang mengamankan data relawan bencana dengan berbagai teknik kriptografi:
 - Login 3 faktor: dongle (flashdisk) + password + biometrik wajah
-- Enkripsi chat dengan super enkripsi (Vigenère + Blowfish-CBC + HMAC)
+- Enkripsi chat dengan super enkripsi (Vigenère + Vernam XOR/HKDF-SHA256 + HMAC)
 - Enkripsi file dengan ChaCha20-Poly1305
 - Enkripsi database dengan AES-256-GCM
 - Steganografi LSB untuk metadata foto
@@ -15,7 +15,7 @@ SafeRelief adalah aplikasi desktop Windows yang mengamankan data relawan bencana
 ## 🎯 Fitur
 
 - **Autentikasi Multi-Faktor**: Dongle, password (Argon2), dan pengenalan wajah (YuNet + SFace)
-- **Chat Terenkripsi**: Super enkripsi Vigenère → Blowfish → HMAC
+- **Chat Terenkripsi**: Super enkripsi Vigenère → Vernam XOR/HKDF → HMAC
 - **Data Korban**: Enkripsi kolom sensitif di database
 - **Dokumentasi Foto**: Steganografi untuk menyisipkan metadata
 - **Berkas Laporan**: Enkripsi file dengan ChaCha20-Poly1305
@@ -30,7 +30,7 @@ SafeRelief adalah aplikasi desktop Windows yang mengamankan data relawan bencana
 - **Database**: SQLite
 - **Kriptografi**:
   - Hash password: Argon2
-  - Enkripsi chat: Vigenère + Blowfish-CBC + HMAC-SHA256
+  - Enkripsi chat: Vigenère + Vernam XOR dengan keystream HKDF-SHA256 + HMAC-SHA256
   - Enkripsi file: ChaCha20-Poly1305
   - Enkripsi database: AES-256-GCM
   - Steganografi: LSB pada PNG
@@ -81,7 +81,7 @@ SafeRelief/
 ├── crypto/          # Modul kriptografi
 │   ├── vigenere.py
 │   ├── aes_module.py
-│   ├── blowfish_module.py
+│   ├── vernam_module.py
 │   ├── chacha_module.py
 │   ├── hashing.py
 │   ├── keys.py
@@ -136,7 +136,10 @@ pytest tests/test_db.py -v
 - LSB rapuh terhadap kompresi gambar
 - Tidak ada liveness detection untuk wajah
 - Vigenère lemah secara kriptanalisis (hanya lapisan demonstrasi)
-- Blowfish menggunakan block size 64-bit (bukan 128-bit)
+- Vernam bukan OTP murni: keystream pseudo-acak dari HKDF tidak memberi perfect secrecy
+- Nonce 16 byte wajib unik untuk setiap pesan; reuse keystream memungkinkan two-time-pad attack
+- HMAC hanya mengautentikasi nonce dan ciphertext, sehingga key Vernam yang salah menghasilkan bytes berbeda tanpa bisa dideteksi
+- Panjang ciphertext membocorkan panjang pesan dan batas pesan adalah 8160 byte
 - Blockchain bersifat lokal, tidak terdistribusi
 - Satu master key untuk organisasi
 - File kunci dongle bisa disalin (tetap butuh password)

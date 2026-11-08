@@ -190,6 +190,14 @@ class ChatPage(QWidget):
         if not text:
             QMessageBox.information(self, "Chat", "Isi pesan terlebih dahulu.")
             return
+        if len(text.encode("utf-8")) > config.VERNAM_MAX_MESSAGE_BYTES:
+            QMessageBox.warning(
+                self,
+                "Pesan terlalu panjang",
+                "Pesan melebihi batas Vernam 8160 byte setelah UTF-8 encode. "
+                "Kurangi panjang pesan sebelum mengirim.",
+            )
+            return
         if self.contact_input.currentIndex() < 0:
             QMessageBox.information(self, "Chat", "Tidak ada penerima.")
             return

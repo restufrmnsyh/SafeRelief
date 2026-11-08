@@ -6,7 +6,7 @@ dalam super enkripsi chat. Bekerja pada karakter ASCII 32-126 (95 karakter cetak
 
 Kenapa Vigenère:
 - Demonstrasi enkripsi klasik (requirement tugas)
-- Lapisan pertama sebelum Blowfish modern
+- Lapisan pertama sebelum Vernam modern
 - Meski lemah kriptanalisis, ini hanya lapisan demo/historis
 
 Catatan: Karakter di luar ASCII 32-126 dibiarkan tidak terenkripsi.

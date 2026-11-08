@@ -159,10 +159,10 @@ class DemoPanelPage(QWidget):
                     self._user_id,
                     int(record_id),
                     vigenere_key=session.get_vigenere_key(),
-                    blowfish_enc_key=session.get_derived_key(
+                    vernam_enc_key=session.get_derived_key(
                         config.HKDF_LABEL_CHAT_ENC
                     ),
-                    blowfish_mac_key=session.get_derived_key(
+                    vernam_mac_key=session.get_derived_key(
                         config.HKDF_LABEL_CHAT_MAC
                     ),
                 )

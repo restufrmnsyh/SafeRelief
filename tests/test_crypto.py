@@ -23,7 +23,7 @@ from pathlib import Path
 # Import semua modul crypto
 from crypto import vigenere
 from crypto import aes_module
-from crypto import blowfish_module
+from crypto import vernam_module
 from crypto import chacha_module
 from crypto import hashing
 from crypto import keys
@@ -135,73 +135,98 @@ class TestAES:
         assert len(ciphertext) >= 32
 
 
-class TestBlowfish:
-    """Tes Blowfish-CBC + HMAC."""
-    
+class TestVernam:
+    """Tes Vernam XOR dengan keystream HKDF dan HMAC."""
+
     def test_roundtrip(self):
-        """Round-trip Blowfish + HMAC."""
         plaintext = b"Chat message for testing"
         enc_key = os.urandom(32)
         mac_key = os.urandom(32)
-        
-        ciphertext = blowfish_module.encrypt(plaintext, enc_key, mac_key)
-        decrypted = blowfish_module.decrypt(ciphertext, enc_key, mac_key)
-        
-        assert decrypted == plaintext
-    
-    def test_wrong_enc_key_fails(self):
-        """Kunci enkripsi salah harus gagal."""
-        plaintext = b"Secret chat"
-        enc_key1 = os.urandom(32)
-        enc_key2 = os.urandom(32)
+        blob = vernam_module.encrypt(plaintext, enc_key, mac_key)
+        assert vernam_module.decrypt(blob, enc_key, mac_key) == plaintext
+
+    def test_same_message_uses_fresh_nonce(self):
+        plaintext = b"Fresh nonce for each chat message"
+        enc_key = os.urandom(32)
         mac_key = os.urandom(32)
-        
-        ciphertext = blowfish_module.encrypt(plaintext, enc_key1, mac_key)
-        
-        # HMAC masih valid (mac_key benar), tapi dekripsi gagal
-        with pytest.raises(ValueError):
-            blowfish_module.decrypt(ciphertext, enc_key2, mac_key)
-    
+        first = vernam_module.encrypt(plaintext, enc_key, mac_key)
+        second = vernam_module.encrypt(plaintext, enc_key, mac_key)
+        assert first != second
+        assert first[:16] != second[:16]
+        assert vernam_module.decrypt(first, enc_key, mac_key) == plaintext
+        assert vernam_module.decrypt(second, enc_key, mac_key) == plaintext
+
+    @pytest.mark.parametrize(
+        "index", [0, 16, -1], ids=("nonce", "ciphertext", "hmac")
+    )
+    def test_tampering_nonce_ciphertext_or_hmac_fails(self, index):
+        enc_key = os.urandom(32)
+        mac_key = os.urandom(32)
+        blob = bytearray(vernam_module.encrypt(b"tamper test", enc_key, mac_key))
+        blob[index] ^= 1
+        with pytest.raises(ValueError, match="HMAC verification failed"):
+            vernam_module.decrypt(bytes(blob), enc_key, mac_key)
+
     def test_wrong_mac_key_fails(self):
-        """Kunci HMAC salah harus gagal saat verifikasi."""
-        plaintext = b"Authenticated message"
         enc_key = os.urandom(32)
-        mac_key1 = os.urandom(32)
-        mac_key2 = os.urandom(32)
-        
-        ciphertext = blowfish_module.encrypt(plaintext, enc_key, mac_key1)
-        
-        # HMAC verification harus gagal
+        blob = vernam_module.encrypt(b"authenticated", enc_key, os.urandom(32))
         with pytest.raises(ValueError, match="HMAC verification failed"):
-            blowfish_module.decrypt(ciphertext, enc_key, mac_key2)
-    
-    def test_tampered_ciphertext_fails(self):
-        """Ubah 1 byte harus gagal verifikasi HMAC."""
-        plaintext = b"Message integrity test"
+            vernam_module.decrypt(blob, enc_key, os.urandom(32))
+
+    def test_wrong_enc_key_is_not_detected_by_specified_hmac(self):
+        plaintext = b"wrong encryption key"
+        mac_key = os.urandom(32)
+        enc_key = bytes(32)
+        wrong_enc_key = bytes([1]) * 32
+        blob = vernam_module.encrypt(plaintext, enc_key, mac_key)
+        result = vernam_module.decrypt(blob, wrong_enc_key, mac_key)
+        assert result != plaintext
+
+    def test_empty_plaintext_is_rejected(self):
+        with pytest.raises(ValueError, match="tidak boleh kosong"):
+            vernam_module.encrypt(b"", os.urandom(32), os.urandom(32))
+
+    def test_8161_byte_plaintext_is_rejected(self):
+        with pytest.raises(ValueError, match="8160 byte"):
+            vernam_module.encrypt(b"x" * 8161, os.urandom(32), os.urandom(32))
+
+    def test_8160_byte_plaintext_is_supported(self):
+        plaintext = b"x" * 8160
         enc_key = os.urandom(32)
         mac_key = os.urandom(32)
-        
-        ciphertext = blowfish_module.encrypt(plaintext, enc_key, mac_key)
-        
-        # Ubah 1 byte di ciphertext (bukan HMAC)
-        tampered = bytearray(ciphertext)
-        tampered[10] ^= 0xFF
-        tampered = bytes(tampered)
-        
-        # HMAC verification harus gagal
-        with pytest.raises(ValueError, match="HMAC verification failed"):
-            blowfish_module.decrypt(tampered, enc_key, mac_key)
-    
-    def test_output_format(self):
-        """Output format: IV(8) + ciphertext + HMAC(32)."""
-        plaintext = b"test"
+        blob = vernam_module.encrypt(plaintext, enc_key, mac_key)
+        assert vernam_module.decrypt(blob, enc_key, mac_key) == plaintext
+
+    def test_ciphertext_length_matches_plaintext_length(self):
+        plaintext = b"same length"
+        blob = vernam_module.encrypt(plaintext, os.urandom(32), os.urandom(32))
+        assert len(blob[16:-32]) == len(plaintext)
+
+    def test_distinct_nonces_produce_distinct_keystreams(self):
+        first_plaintext = b"message number 1"
+        second_plaintext = b"message number 2"
         enc_key = os.urandom(32)
         mac_key = os.urandom(32)
-        
-        ciphertext = blowfish_module.encrypt(plaintext, enc_key, mac_key)
-        
-        # Minimal: IV(8) + 1 block padded(8) + HMAC(32) = 48 bytes
-        assert len(ciphertext) >= 48
+        first = vernam_module.encrypt(first_plaintext, enc_key, mac_key)
+        second = vernam_module.encrypt(second_plaintext, enc_key, mac_key)
+        assert first[:16] != second[:16]
+        first_stream = bytes(
+            a ^ b for a, b in zip(first[16:-32], first_plaintext)
+        )
+        second_stream = bytes(
+            a ^ b for a, b in zip(second[16:-32], second_plaintext)
+        )
+        assert first_stream != second_stream
+
+    def test_keys_must_be_32_bytes(self):
+        with pytest.raises(ValueError, match="32 bytes"):
+            vernam_module.encrypt(b"text", b"short", os.urandom(32))
+        with pytest.raises(ValueError, match="32 bytes"):
+            vernam_module.encrypt(b"text", os.urandom(32), b"short")
+
+    def test_too_short_blob_is_rejected(self):
+        with pytest.raises(ValueError, match="minimal 48 byte"):
+            vernam_module.decrypt(b"\0" * 47, os.urandom(32), os.urandom(32))
 
 
 class TestChaCha20:
@@ -491,7 +516,7 @@ class TestKeys:
 
 
 class TestSuperEncrypt:
-    """Tes super enkripsi (Vigenère + Blowfish + HMAC)."""
+    """Tes super enkripsi (Vigenere + Vernam + HMAC)."""
     
     def test_roundtrip(self):
         """Round-trip super enkripsi."""
@@ -505,18 +530,24 @@ class TestSuperEncrypt:
         
         assert decrypted == plaintext
     
-    def test_wrong_blowfish_key_fails(self):
-        """Kunci Blowfish salah harus gagal."""
+    def test_wrong_vernam_enc_key_is_not_authenticated(self):
+        """A wrong Vernam key is not detected by the specified HMAC input."""
         plaintext = "Test message"
         vig_key = "KEY"
-        enc_key1 = os.urandom(32)
-        enc_key2 = os.urandom(32)
+        enc_key1 = bytes(32)
+        enc_key2 = bytes([1]) * 32
         mac_key = os.urandom(32)
         
         ciphertext = super_encrypt.encrypt(plaintext, vig_key, enc_key1, mac_key)
         
-        with pytest.raises(ValueError):
-            super_encrypt.decrypt(ciphertext, vig_key, enc_key2, mac_key)
+        try:
+            plaintext_with_wrong_key = super_encrypt.decrypt(
+                ciphertext, vig_key, enc_key2, mac_key
+            )
+        except ValueError as exc:
+            assert "Gagal decode UTF-8" in str(exc)
+        else:
+            assert plaintext_with_wrong_key != plaintext
     
     def test_wrong_vigenere_key_different_result(self):
         """Kunci Vigenère salah menghasilkan plaintext berbeda (bukan error)."""
@@ -528,7 +559,7 @@ class TestSuperEncrypt:
         
         ciphertext = super_encrypt.encrypt(plaintext, correct_vig_key, enc_key, mac_key)
         
-        # Dekripsi dengan Vigenère key salah: Blowfish berhasil, tapi Vigenère menghasilkan teks acak
+        # Dekripsi dengan Vigenere key salah menghasilkan teks berbeda.
         wrong_plaintext = super_encrypt.decrypt(ciphertext, wrong_vig_key, enc_key, mac_key)
         
         # Hasil berbeda dari plaintext asli (bukan error)

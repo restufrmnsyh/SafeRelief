@@ -29,7 +29,7 @@ Pengguna adalah mahasiswa yang akan mempresentasikan dan ditanya detail kode. Ma
 | Tema UI | qt-material (opsional) |
 | Database | **SQLite** (`sqlite3` bawaan), satu file `data/saferelief.db` |
 | Hash password | **Argon2** (`argon2-cffi`) |
-| Enkripsi teks (chat) | **Vigenère lalu Blowfish-CBC + HMAC-SHA256** (`pycryptodome`) |
+| Enkripsi teks (chat) | **Vigenère lalu Vernam XOR dengan keystream HKDF-SHA256 + HMAC-SHA256** (`cryptography`) |
 | Enkripsi file | **ChaCha20-Poly1305** (`cryptography`) |
 | Enkripsi kolom DB | **AES-256-GCM** (`cryptography`) |
 | Steganografi | **LSB pada PNG** (Pillow + numpy) |
@@ -38,7 +38,7 @@ Pengguna adalah mahasiswa yang akan mempresentasikan dan ditanya detail kode. Ma
 | Dongle | `psutil` (cari drive removable) + `ctypes` `GetVolumeInformationW` (serial volume) + file kunci `.saferelief_key` |
 | Tes | `pytest` |
 
-Aturan kripto: **jangan membuat algoritma modern sendiri** (AES, Blowfish, ChaCha20, SHA-256, Argon2 pakai library). Yang boleh/harus ditulis sendiri: **Vigenère, blockchain, LSB**.
+Aturan kripto: **jangan membuat primitive modern sendiri** (AES, HKDF-SHA256, HMAC-SHA256, ChaCha20, SHA-256, Argon2 pakai library). Lapisan Vernam hanya XOR bytes dengan keystream HKDF dan tetap memakai HMAC dari library. Yang ditulis sendiri: **Vigenère, wrapper XOR Vernam, blockchain, LSB**.
 
 ## 3. Peran Pengguna
 
@@ -99,7 +99,7 @@ Satu **master key organisasi** (32 byte acak), dibuat saat `setup_admin.py`. Mas
 | Label | Dipakai untuk |
 |---|---|
 | `b"db"` | AES-GCM kolom database (32 byte) |
-| `b"chat-enc"` | Blowfish chat (32 byte) |
+| `b"chat-enc"` | Keystream Vernam chat via HKDF (32-byte input key) |
 | `b"chat-mac"` | HMAC-SHA256 chat (32 byte) |
 | `b"file"` | ChaCha20-Poly1305 file (32 byte) |
 | `b"stego"` | AES-GCM payload steganografi (32 byte) |
@@ -110,10 +110,10 @@ Kunci turunan dihitung di memori, tidak pernah ditulis ke disk atau database. Di
 ## 6. Spesifikasi Tiap Fitur
 
 ### 6.1 Chat teks (super enkripsi)
-- Kirim: `Vigenère(plaintext, vig_key)` lalu `Blowfish-CBC`.
-- Blowfish: IV acak 8 byte, padding PKCS7, kunci 32 byte. **Encrypt-then-MAC**: `HMAC-SHA256(mac_key, iv + ciphertext)`.
-- Format blob: `[IV 8][ciphertext][HMAC 32]`. Disimpan di `messages.ciphertext`.
-- Dekripsi: verifikasi HMAC dengan `hmac.compare_digest` SEBELUM dekripsi, lalu Blowfish, lalu Vigenère.
+- Kirim: `Vigenère(plaintext, vig_key)` lalu Vernam XOR dengan keystream pseudo-acak dari HKDF-SHA256 (`salt=nonce`, `info=b"vernam"`), kunci 32 byte.
+- Nonce acak 16 byte HARUS baru untuk setiap pesan; reuse keystream memungkinkan two-time-pad attack. **HMAC-SHA256**: `HMAC(mac_key, nonce + ciphertext)`.
+- Format blob: `[nonce 16][ciphertext][HMAC 32]`. Ciphertext sama panjang dengan plaintext; panjang asli pesan terlihat. Batas plaintext 8160 byte per pesan (maksimum output HKDF-SHA256 = `255 * 32`).
+- Dekripsi: verifikasi HMAC dengan `hmac.compare_digest` SEBELUM derivasi keystream dan XOR balik, lalu Vigenère.
 - **Kunci Vigenère otomatis** (diturunkan dari master key, label `b"vigenere"`). Pengguna tidak mengetik kunci: Decrypt cukup satu klik.
 - **Mode demo:** di panel chat ada kotak opsional "Gunakan kunci Vigenère manual". Normalnya kosong (pakai kunci otomatis). Jika diisi, kunci manual dipakai untuk dekripsi, sehingga kunci salah menghasilkan teks acak (bukan error) untuk keperluan demo.
 - Inbox menampilkan ciphertext (base64/hex) dulu; teks asli muncul setelah Decrypt.
@@ -175,7 +175,7 @@ Dijalankan sekali dari terminal. Menolak jalan jika admin sudah ada. Langkah: in
 
 ```
 safe_relief/
-├── crypto/      vigenere.py, aes_module.py, blowfish_module.py, chacha_module.py,
+├── crypto/      vigenere.py, aes_module.py, vernam_module.py, chacha_module.py,
 │                hashing.py, keys.py, super_encrypt.py, stego_lsb.py, blockchain.py
 ├── auth/        dongle.py, face_auth.py, login.py, session.py
 ├── database/    schema.sql, db.py, secure_store.py
@@ -190,7 +190,7 @@ safe_relief/
 └── requirements.txt
 ```
 
-Dependensi: PySide6, cryptography, argon2-cffi, pycryptodome, opencv-python, numpy, Pillow, psutil, pytest (opsional: qt-material).
+Dependensi: PySide6, cryptography, argon2-cffi, opencv-python, numpy, Pillow, psutil, pytest (opsional: qt-material).
 
 ## 9. Aturan Bekerja untuk Agent
 
@@ -208,4 +208,4 @@ Dependensi: PySide6, cryptography, argon2-cffi, pycryptodome, opencv-python, num
 
 ## 10. Keterbatasan yang Diakui (untuk laporan)
 
-LSB rapuh terhadap kompresi; tidak ada liveness detection wajah; Vigenère lemah secara kriptanalisis (lapisan klasik); Blowfish blok 64-bit; blockchain lokal tidak terdistribusi; satu master key dan satu admin (jika dongle admin hilang, pemulihan lewat `recovery.key` yang disimpan offline; tanpa file itu, data tidak bisa dipulihkan); file kunci dongle bisa disalin.
+LSB rapuh terhadap kompresi; tidak ada liveness detection wajah; Vigenère lemah secara kriptanalisis (lapisan klasik); Vernam bukan OTP murni — perfect secrecy tidak dipertahankan karena keystream pseudo-acak berasal dari HKDF, bukan kunci acak sungguhan yang dibagikan sebelumnya; panjang ciphertext membocorkan panjang pesan asli; panjang pesan dibatasi 8160 byte oleh batas output HKDF-SHA256; HMAC yang hanya mencakup nonce dan ciphertext tidak dapat mendeteksi kunci Vernam yang salah (akan menghasilkan plaintext bytes berbeda); blockchain lokal tidak terdistribusi; satu master key dan satu admin (jika dongle admin hilang, pemulihan lewat `recovery.key` yang disimpan offline; tanpa file itu, data tidak bisa dipulihkan); file kunci dongle bisa disalin.
