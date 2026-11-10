@@ -100,6 +100,7 @@ class PhotoPage(QWidget):
         self._pending_metadata: dict[str, object] | None = None
         self._pending_output: Path | None = None
         self._cancelled = False
+        self._preview_unlocked_by_row: dict[int, bool] = {}
 
         self.table = QTableWidget(0, len(self._columns))
         self.table.setHorizontalHeaderLabels(self._columns)
@@ -118,6 +119,7 @@ class PhotoPage(QWidget):
         for posko in secure_store.list_posko(self._conn):
             label = f"{posko['nama']} ({posko['lokasi']})"
             self.posko_combo.addItem(label, int(posko["id"]))
+        self.victim_combo.currentIndexChanged.connect(self._sync_victim_posko)
         self.caption_input = QLineEdit()
         self.caption_input.setPlaceholderText("Keterangan foto")
         self._selected_image_path: Path | None = None
@@ -129,9 +131,12 @@ class PhotoPage(QWidget):
         self.extract_button = QPushButton("Verifikasi / Ekstrak")
         self.extract_button.clicked.connect(self.extract_selected)
         self.extract_button.setVisible(self._role == "admin")
-        self.metadata_view = QLabel("Metadata hasil ekstraksi tampil di sini.")
+        self.decrypt_button = QPushButton("Decrypt")
+        self.decrypt_button.clicked.connect(self.decrypt_selected)
+        self.decrypt_button.setVisible(self._role == "admin")
+        self.metadata_view = QLabel("Metadata terenkripsi tampil di sini.")
         self.metadata_view.setWordWrap(True)
-        self.image_view = QLabel("Preview foto akan tampil di sini.")
+        self.image_view = QLabel("Preview foto akan tampil setelah decrypt.")
         self.image_view.setMinimumHeight(220)
         self.image_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_view.setStyleSheet("border: 1px solid #555; background: #111; color: #ddd;")
@@ -147,7 +152,9 @@ class PhotoPage(QWidget):
         if self._role == "relawan":
             actions.addWidget(self.choose_photo_button)
             actions.addWidget(self.upload_button)
-        actions.addWidget(self.extract_button)
+        if self._role == "admin":
+            actions.addWidget(self.extract_button)
+            actions.addWidget(self.decrypt_button)
         actions.addStretch()
         actions.addWidget(self.back_button)
 
@@ -231,6 +238,24 @@ class PhotoPage(QWidget):
         worker.finished.connect(self._embed_finished)
         self._worker = worker
         worker.start()
+
+    def _sync_victim_posko(self) -> None:
+        """Posko otomatis mengikuti posko korban yang dipilih."""
+        victim_id = self._combo_value(self.victim_combo)
+        if victim_id is None:
+            self.posko_combo.setCurrentIndex(0)
+            return
+        for victim in secure_store.list_victims(self._conn):
+            if int(victim["id"]) == victim_id:
+                posko_id = victim["posko_id"]
+                if posko_id is None:
+                    self.posko_combo.setCurrentIndex(0)
+                else:
+                    index = self.posko_combo.findData(int(posko_id))
+                    if index >= 0:
+                        self.posko_combo.setCurrentIndex(index)
+                return
+        self.posko_combo.setCurrentIndex(0)
 
     @staticmethod
     def _combo_value(combo: QComboBox) -> int | None:
@@ -322,7 +347,7 @@ class PhotoPage(QWidget):
         self._refresh_selected_photo_preview()
 
     def _refresh_selected_photo_preview(self) -> None:
-        """Tampilkan gambar yang sedang dipilih di panel preview."""
+        """Tampilkan gambar yang sedang dipilih di panel preview hanya setelah decrypt eksplisit."""
         row = self.table.currentRow()
         if row < 0:
             self.image_view.clear()
@@ -334,6 +359,13 @@ class PhotoPage(QWidget):
             self.image_view.clear()
             self.image_view.setText("Foto tidak tersedia.")
             return
+
+        unlocked = self._preview_unlocked_by_row.get(photo_id, False)
+        if self._role == "admin" and not unlocked:
+            self.image_view.clear()
+            self.image_view.setText("Preview foto akan tampil setelah decrypt.")
+            return
+
         try:
             image_path = self._stored_image_path(str(photo["image_path"]))
             pixmap = QPixmap(str(image_path))
@@ -353,12 +385,43 @@ class PhotoPage(QWidget):
             self.image_view.setText("Preview foto tidak tersedia.")
 
     def extract_selected(self) -> None:
-        """Admin mengekstrak LSB dan memverifikasi tag AES-GCM metadata."""
+        """Ambil payload terenkripsi tanpa membuka plaintext agar admin harus decrypt eksplisit."""
         if not self._authorized("admin"):
             return
         row = self.table.currentRow()
         if row < 0:
             QMessageBox.information(self, "Ekstrak foto", "Pilih foto terlebih dahulu.")
+            return
+        photo_id = int(self.table.item(row, 0).text())
+        photo = next(item for item in self._photos if item["id"] == photo_id)
+        try:
+            image_path = self._stored_image_path(str(photo["image_path"]))
+            encrypted_payload = stego_lsb.extract(str(image_path))
+            if not encrypted_payload:
+                raise ValueError("Payload stego kosong.")
+            self.metadata_view.setText(
+                json.dumps({
+                    "encrypted_payload": encrypted_payload.hex(),
+                    "status": "terenkripsi",
+                    "message": "Klik Decrypt untuk membuka metadata asli.",
+                }, ensure_ascii=False, indent=2)
+            )
+            self._preview_unlocked_by_row[photo_id] = False
+            self.image_view.clear()
+            self.image_view.setText("Preview foto akan tampil setelah decrypt.")
+            self.status_label.setText("Metadata foto masih terenkripsi. Klik Decrypt untuk melihat isi aslinya.")
+        except (OSError, ValueError) as exc:
+            message = f"Foto rusak atau payload tidak valid: {exc}"
+            self.status_label.setText(message)
+            QMessageBox.warning(self, "Ekstrak gagal", message)
+
+    def decrypt_selected(self) -> None:
+        """Decrypt payload stego dan tampilkan metadata serta preview foto asli setelah verifikasi."""
+        if not self._authorized("admin"):
+            return
+        row = self.table.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Decrypt foto", "Pilih foto terlebih dahulu.")
             return
         photo_id = int(self.table.item(row, 0).text())
         photo = next(item for item in self._photos if item["id"] == photo_id)
@@ -375,13 +438,14 @@ class PhotoPage(QWidget):
         except (InvalidTag, OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
             message = f"Foto rusak, diubah, atau metadata tidak valid: {exc}"
             self.status_label.setText(message)
-            QMessageBox.warning(self, "Verifikasi foto gagal", message)
+            QMessageBox.warning(self, "Decrypt gagal", message)
             return
         self.metadata_view.setText(
             json.dumps(metadata, ensure_ascii=False, indent=2)
         )
+        self._preview_unlocked_by_row[photo_id] = True
         self._refresh_selected_photo_preview()
-        self.status_label.setText("Foto dan metadata berhasil diverifikasi.")
+        self.status_label.setText("Metadata dan foto berhasil didecrypt dan diverifikasi.")
 
     @staticmethod
     def _stored_image_path(filename: str) -> Path:

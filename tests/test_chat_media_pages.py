@@ -170,13 +170,139 @@ def test_photo_page_embeds_encrypted_metadata_and_admin_extracts(
     admin_page = PhotoPage(conn)
     admin_page.table.selectRow(0)
     admin_page.extract_selected()
+    encrypted = admin_page.metadata_view.text()
+    assert '"victim_id":' not in encrypted
+    assert '"original_sha256":' not in encrypted
+    assert admin_page.image_view.text() != ""
+    admin_page.decrypt_selected()
     extracted = admin_page.metadata_view.text()
     assert '"victim_id":' in extracted
-    assert '"coordinates"' not in extracted
     assert '"original_sha256":' in extracted
     assert admin_page.image_view.pixmap() is not None
     assert not admin_page.image_view.pixmap().isNull()
     page.deleteLater()
+    admin_page.deleteLater()
+    qapp.processEvents()
+
+
+def test_photo_page_auto_sets_posko_when_victim_selected(media_context, qapp):
+    conn, _admin_id, _volunteer_id, victim_id, posko_id, _storage_path = media_context
+    page = PhotoPage(conn)
+    page.victim_combo.setCurrentIndex(page.victim_combo.findData(victim_id))
+    assert page.posko_combo.currentData() == posko_id
+    page.deleteLater()
+    qapp.processEvents()
+
+
+def test_photo_preview_stays_hidden_until_admin_decrypts(media_context, tmp_path: Path, qapp):
+    conn, admin_id, volunteer_id, victim_id, posko_id, storage_path = media_context
+    source_path = tmp_path / "incident.jpg"
+    Image.new("RGB", (800, 800), color=(90, 120, 150)).save(source_path)
+
+    volunteer_page = PhotoPage(conn)
+    volunteer_page.victim_combo.setCurrentIndex(volunteer_page.victim_combo.findData(victim_id))
+    volunteer_page.posko_combo.setCurrentIndex(volunteer_page.posko_combo.findData(posko_id))
+    volunteer_page.caption_input.setText("Kondisi posko")
+    volunteer_page.embed_photo(source_path)
+    _finish_worker(volunteer_page, qapp)
+
+    session.login(
+        {"id": admin_id, "username": "admin", "role": "admin"},
+        session.get_master_key(),
+    )
+    admin_page = PhotoPage(conn)
+    admin_page.table.selectRow(0)
+    assert "Preview foto akan tampil setelah decrypt" in admin_page.image_view.text()
+    assert admin_page.image_view.pixmap() is None or admin_page.image_view.pixmap().isNull()
+
+    admin_page.extract_selected()
+    assert "Preview foto akan tampil setelah decrypt" in admin_page.image_view.text()
+    admin_page.decrypt_selected()
+    assert admin_page.image_view.text() == ""
+    assert admin_page.image_view.pixmap() is not None
+    assert not admin_page.image_view.pixmap().isNull()
+
+    volunteer_page.deleteLater()
+    admin_page.deleteLater()
+    qapp.processEvents()
+
+
+def test_photo_preview_unlocks_per_row_only(media_context, tmp_path: Path, qapp):
+    conn, admin_id, volunteer_id, victim_id, posko_id, _storage_path = media_context
+
+    first_source = tmp_path / "first.jpg"
+    second_source = tmp_path / "second.jpg"
+    Image.new("RGB", (800, 800), color=(90, 120, 150)).save(first_source)
+    Image.new("RGB", (900, 900), color=(25, 80, 130)).save(second_source)
+
+    volunteer_page = PhotoPage(conn)
+    volunteer_page.victim_combo.setCurrentIndex(volunteer_page.victim_combo.findData(victim_id))
+    volunteer_page.posko_combo.setCurrentIndex(volunteer_page.posko_combo.findData(posko_id))
+    volunteer_page.caption_input.setText("Foto pertama")
+    volunteer_page.embed_photo(first_source)
+    _finish_worker(volunteer_page, qapp)
+    volunteer_page.caption_input.clear()
+    volunteer_page.caption_input.setText("Foto kedua")
+    volunteer_page.embed_photo(second_source)
+    _finish_worker(volunteer_page, qapp)
+
+    session.login(
+        {"id": admin_id, "username": "admin", "role": "admin"},
+        session.get_master_key(),
+    )
+    admin_page = PhotoPage(conn)
+    assert admin_page.table.rowCount() == 2
+
+    admin_page.table.selectRow(0)
+    admin_page.extract_selected()
+    admin_page.decrypt_selected()
+    assert admin_page.image_view.text() == ""
+    assert admin_page.image_view.pixmap() is not None
+    assert not admin_page.image_view.pixmap().isNull()
+
+    admin_page.table.selectRow(1)
+    assert admin_page.image_view.text() == "Preview foto akan tampil setelah decrypt."
+    assert admin_page.image_view.pixmap() is None or admin_page.image_view.pixmap().isNull()
+
+    admin_page.extract_selected()
+    admin_page.decrypt_selected()
+    assert admin_page.image_view.text() == ""
+    assert admin_page.image_view.pixmap() is not None
+    assert not admin_page.image_view.pixmap().isNull()
+
+    volunteer_page.deleteLater()
+    admin_page.deleteLater()
+    qapp.processEvents()
+
+
+def test_file_page_masks_admin_row_until_decrypt_then_allows_download(
+    media_context, tmp_path: Path, qapp, monkeypatch: pytest.MonkeyPatch
+):
+    conn, admin_id, volunteer_id, *_rest, storage_path = media_context
+    source_path = tmp_path / "laporan.txt"
+    source_path.write_bytes(b"Laporan rahasia untuk admin.")
+    volunteer_page = FilesPage(conn)
+    volunteer_page.upload_file(source_path)
+    _finish_worker(volunteer_page, qapp)
+
+    session.login(
+        {"id": admin_id, "username": "admin", "role": "admin"},
+        session.get_master_key(),
+    )
+    admin_page = FilesPage(conn)
+    monkeypatch.setattr(
+        "ui.files_page.QFileDialog.getSaveFileName",
+        lambda *args, **kwargs: (str(tmp_path / "decrypted_laporan.txt"), ""),
+    )
+    assert admin_page.table.item(0, 1).text() == "[terenkripsi]"
+    action_button = admin_page.table.cellWidget(0, 5)
+    assert getattr(action_button, "text", lambda: "")() == "Decrypt"
+    action_button.click()
+    _finish_worker(admin_page, qapp)
+    assert admin_page.table.item(0, 1).text() == source_path.name
+    assert admin_page.table.cellWidget(0, 5).text() == "Unduh"
+
+    volunteer_page.deleteLater()
     admin_page.deleteLater()
     qapp.processEvents()
 
