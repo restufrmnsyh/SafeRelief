@@ -152,9 +152,8 @@ def test_photo_page_embeds_encrypted_metadata_and_admin_extracts(
     source_path = tmp_path / "incident.jpg"
     Image.new("RGB", (800, 800), color=(90, 120, 150)).save(source_path)
     page = PhotoPage(conn)
-    page.victim_id_input.setText(str(victim_id))
-    page.posko_id_input.setText(str(posko_id))
-    page.coordinates_input.setText("-6.2,106.8")
+    page.victim_combo.setCurrentIndex(page.victim_combo.findData(victim_id))
+    page.posko_combo.setCurrentIndex(page.posko_combo.findData(posko_id))
     page.caption_input.setText("Kondisi posko")
     page.embed_photo(source_path)
     _finish_worker(page, qapp)
@@ -173,8 +172,10 @@ def test_photo_page_embeds_encrypted_metadata_and_admin_extracts(
     admin_page.extract_selected()
     extracted = admin_page.metadata_view.text()
     assert '"victim_id":' in extracted
-    assert '"coordinates": "-6.2,106.8"' in extracted
+    assert '"coordinates"' not in extracted
     assert '"original_sha256":' in extracted
+    assert admin_page.image_view.pixmap() is not None
+    assert not admin_page.image_view.pixmap().isNull()
     page.deleteLater()
     admin_page.deleteLater()
     qapp.processEvents()

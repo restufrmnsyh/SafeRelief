@@ -1,7 +1,9 @@
 """Tampilan data korban dengan daftar plaintext aman dan detail terdekripsi."""
 
+import base64
 import sqlite3
 
+from cryptography.exceptions import InvalidTag
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
@@ -26,7 +28,7 @@ from database import secure_store
 
 
 STATUSES = ("selamat", "luka ringan", "luka berat", "meninggal", "tidak diketahui")
-TABLE_COLUMNS = ("Kode", "Nama panggilan", "Usia", "Status", "Posko")
+TABLE_COLUMNS = ("Kode", "Nama panggilan", "Usia", "Status", "Posko", "Aksi")
 
 
 class VictimFormDialog(QDialog):
@@ -129,6 +131,86 @@ class VictimFormDialog(QDialog):
         }
 
 
+class VictimDetailDialog(QDialog):
+    """Tampilan detail korban yang menampilkan ciphertext sebelum dekripsi eksplisit."""
+
+    decrypt_requested = Signal()
+
+    def __init__(
+        self,
+        summary: dict[str, object] | None,
+        fields: dict[str, bytes | None],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Detail Korban")
+        self._fields = dict(fields)
+
+        layout = QVBoxLayout(self)
+        title = QLabel("Ringkasan korban")
+        title.setStyleSheet("font-weight: 700;")
+        layout.addWidget(title)
+
+        summary_layout = QFormLayout()
+        for label, value in (summary or {}).items():
+            summary_layout.addRow(f"{label}:", QLabel(str(value) if value is not None else "-"))
+        layout.addLayout(summary_layout)
+
+        sensitive_title = QLabel("Kolom sensitif")
+        sensitive_title.setStyleSheet("font-weight: 700;")
+        layout.addWidget(sensitive_title)
+
+        table = QTableWidget(0, 3)
+        table.setHorizontalHeaderLabels(["Field", "Ciphertext (base64)", "Plaintext"])
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        table.verticalHeader().setVisible(False)
+        table.setColumnWidth(0, 200)
+        table.setColumnWidth(1, 350)
+        table.setColumnWidth(2, 250)
+
+        for field_name, blob in self._fields.items():
+            row = table.rowCount()
+            table.insertRow(row)
+            table.setItem(row, 0, QTableWidgetItem(field_name))
+            ciphertext = "-" if blob is None else base64.b64encode(blob).decode("ascii")
+            table.setItem(row, 1, QTableWidgetItem(ciphertext))
+            table.setItem(row, 2, QTableWidgetItem("(terenkripsi)"))
+
+        layout.addWidget(table)
+        buttons = QHBoxLayout()
+        decrypt_button = QPushButton("Decrypt")
+        decrypt_button.clicked.connect(self.decrypt_requested.emit)
+        close_button = QPushButton("Tutup")
+        close_button.clicked.connect(self.reject)
+        buttons.addStretch()
+        buttons.addWidget(decrypt_button)
+        buttons.addWidget(close_button)
+        layout.addLayout(buttons)
+        self._table = table
+
+    def show_plaintext(self, detail: dict) -> None:
+        """Isi kolom plaintext dengan hasil dekripsi yang baru saja diminta."""
+        for row in range(self._table.rowCount()):
+            field_name = self._table.item(row, 0).text()
+            value = detail.get(field_name)
+            self._table.setItem(
+                row,
+                2,
+                QTableWidgetItem(str(value) if value is not None else "(terenkripsi)"),
+            )
+
+    def clear_plaintext(self) -> None:
+        """Kosongkan semua plaintext agar tidak tertinggal setelah logout."""
+        for row in range(self._table.rowCount()):
+            self._table.setItem(row, 2, QTableWidgetItem("(terenkripsi)"))
+
+    def closeEvent(self, event) -> None:
+        """Pastikan plaintext tidak tertinggal saat dialog ditutup."""
+        self.clear_plaintext()
+        super().closeEvent(event)
+
+
 class VictimsPage(QWidget):
     """Daftar, cari, filter, tambah/edit, dan lihat detail korban."""
 
@@ -145,6 +227,9 @@ class VictimsPage(QWidget):
         )
         self._victims: list[dict] = []
         self._posko_names: dict[int, str] = {}
+        self._detail_dialog: VictimDetailDialog | None = None
+        self._decrypted_victim_id: int | None = None
+        self._is_refreshing_table = False
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Cari kode atau nama panggilan")
@@ -161,8 +246,10 @@ class VictimsPage(QWidget):
         self.table.setSelectionBehavior(
             QTableWidget.SelectionBehavior.SelectRows
         )
+        self.table.setColumnWidth(5, 140)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.table.cellDoubleClicked.connect(self._on_row_double_clicked)
+        self.table.currentCellChanged.connect(self._handle_selection_changed)
 
         self.add_button = QPushButton("Tambah")
         self.add_button.clicked.connect(self.add_victim)
@@ -172,6 +259,7 @@ class VictimsPage(QWidget):
         self.detail_button.clicked.connect(self.show_detail)
         self.back_button = QPushButton("Kembali ke Dashboard")
         self.back_button.clicked.connect(self.dashboard_requested.emit)
+        self.edit_button.setEnabled(False)
 
         controls = QHBoxLayout()
         controls.addWidget(self.search_input, stretch=1)
@@ -207,41 +295,84 @@ class VictimsPage(QWidget):
             self.table.setCurrentCell(row, column)
             self.show_detail()
 
+    def _handle_selection_changed(self, row: int, column: int, previous_row: int, previous_column: int) -> None:
+        """Hanya sinkronkan tombol Edit ke row yang aktif; jangan membatalkan status decrypt yang sudah valid."""
+        if self._is_refreshing_table:
+            return
+        victim = self._selected_victim()
+        if victim is None:
+            self.edit_button.setEnabled(False)
+            return
+        self._sync_edit_button_state(victim)
+
+    def _sync_edit_button_state(self, victim: dict | None = None) -> None:
+        """Admin harus mendekripsi data korban sebelum menu Edit dibuka."""
+        if victim is None:
+            victim = self._selected_victim()
+        if self._user["role"] == "admin":
+            enabled = victim is not None and int(victim["id"]) == int(self._decrypted_victim_id or -1)
+            self.edit_button.setEnabled(enabled)
+            return
+        self.edit_button.setEnabled(True)
+
+    def _mask_table_value(self, value: object) -> str:
+        """Tampilkan placeholder terenkripsi di daftar admin sampai decrypt dieksekusi."""
+        if value is None:
+            return "-"
+        text = str(value)
+        return "[terenkripsi]" if text else "-"
+
     def _apply_filters(self) -> None:
         if not self._authorized():
             self._victims.clear()
             self.table.setRowCount(0)
             return
+        self._is_refreshing_table = True
         query = self.search_input.text().strip().casefold()
         status = self.status_filter.currentData()
         self.table.setRowCount(0)
-        for victim in self._victims:
-            if status and victim["status"] != status:
-                continue
-            haystack = " ".join(
-                (
-                    str(victim.get("kode_korban") or ""),
-                    str(victim.get("nama_panggilan") or ""),
-                )
-            ).casefold()
-            if query and query not in haystack:
-                continue
+        try:
+            for victim in self._victims:
+                if status and victim["status"] != status:
+                    continue
+                haystack = " ".join(
+                    (
+                        str(victim.get("kode_korban") or ""),
+                        str(victim.get("nama_panggilan") or ""),
+                    )
+                ).casefold()
+                if query and query not in haystack:
+                    continue
 
-            row_index = self.table.rowCount()
-            self.table.insertRow(row_index)
-            values = (
-                victim.get("kode_korban"),
-                victim.get("nama_panggilan"),
-                victim.get("usia"),
-                victim.get("status"),
-                self._posko_names.get(victim.get("posko_id")),
-            )
-            for column, value in enumerate(values):
-                item = QTableWidgetItem("" if value is None else str(value))
-                if column == 0:
-                    item.setData(Qt.ItemDataRole.UserRole, victim["id"])
-                self.table.setItem(row_index, column, item)
-        self.table.resizeColumnsToContents()
+                row_index = self.table.rowCount()
+                self.table.insertRow(row_index)
+                is_admin_view = self._user["role"] == "admin"
+                is_decrypted = int(victim["id"]) == int(self._decrypted_victim_id or -1)
+                values = (
+                    victim.get("kode_korban"),
+                    victim.get("nama_panggilan"),
+                    victim.get("usia"),
+                    victim.get("status"),
+                    self._posko_names.get(victim.get("posko_id")),
+                )
+                for column, value in enumerate(values):
+                    raw_text = "" if value is None else str(value)
+                    if is_admin_view and not is_decrypted:
+                        raw_text = self._mask_table_value(value)
+                    item = QTableWidgetItem(raw_text)
+                    if column == 0:
+                        item.setData(Qt.ItemDataRole.UserRole, victim["id"])
+                    self.table.setItem(row_index, column, item)
+
+                action_button = QPushButton("Decrypt" if is_admin_view and not is_decrypted else "Open")
+                action_button.setFixedWidth(110)
+                action_button.clicked.connect(
+                    lambda _checked=False, victim_id=int(victim["id"]): self._decrypt_victim(victim_id)
+                )
+                self.table.setCellWidget(row_index, 5, action_button)
+            self.table.resizeColumnsToContents()
+        finally:
+            self._is_refreshing_table = False
 
     def _selected_victim(self) -> dict | None:
         row = self.table.currentRow()
@@ -297,6 +428,15 @@ class VictimsPage(QWidget):
         victim = self._selected_victim()
         if victim is None:
             return
+        if self._user["role"] == "admin":
+            victim_id = int(victim["id"])
+            if self._decrypted_victim_id != victim_id:
+                QMessageBox.warning(
+                    self,
+                    "Edit diblokir",
+                    "Data korban harus didekripsi terlebih dahulu sebelum bisa diedit.",
+                )
+                return
         if not self._can_edit(victim):
             QMessageBox.warning(
                 self,
@@ -336,6 +476,34 @@ class VictimsPage(QWidget):
         victim = self._selected_victim()
         if victim is None:
             return
+
+        if self._user["role"] == "admin":
+            ciphertext = secure_store.get_victim_ciphertext(
+                self._conn, int(self._user["id"]), int(victim["id"])
+            )
+            if ciphertext is None:
+                QMessageBox.warning(self, "Data Korban", "Data korban tidak ditemukan.")
+                self.refresh()
+                return
+
+            summary = {
+                "Kode korban": victim.get("kode_korban"),
+                "Nama panggilan": victim.get("nama_panggilan"),
+                "Status": victim.get("status"),
+                "Posko": self._posko_names.get(victim.get("posko_id")),
+            }
+            if self._detail_dialog is not None and self._detail_dialog.isVisible():
+                self._detail_dialog.close()
+            dialog = VictimDetailDialog(summary, ciphertext, parent=self)
+            dialog.decrypt_requested.connect(
+                lambda victim_id=int(victim["id"]): self._decrypt_victim(victim_id)
+            )
+            dialog.finished.connect(self._reset_detail_dialog)
+            self._detail_dialog = dialog
+            self._sync_edit_button_state(victim)
+            dialog.open()
+            return
+
         detail = secure_store.get_victim(
             self._conn, bytes(self._db_key), int(victim["id"])
         )
@@ -344,8 +512,6 @@ class VictimsPage(QWidget):
             self.refresh()
             return
 
-        # Sesuai peran pada rancangan: relawan dapat melihat data untuk
-        # koordinasi, sedangkan edit dibatasi pada input relawan itu sendiri.
         fields = (
             ("kode_korban", "Kode"),
             ("nama_panggilan", "Nama panggilan"),
@@ -364,13 +530,59 @@ class VictimsPage(QWidget):
             for key, label in fields
         ]
         posko_id = detail.get("posko_id")
-        lines.append(
-            f"Posko: {self._posko_names.get(posko_id, '-')}"
-        )
+        lines.append(f"Posko: {self._posko_names.get(posko_id, '-')}")
         QMessageBox.information(self, "Detail Korban", "\n".join(lines))
 
+    def _decrypt_victim(self, victim_id: int) -> None:
+        """Decrypt detail korban untuk admin hanya saat tombol Decrypt ditekan."""
+        if not self._authorized():
+            return
+        try:
+            detail = secure_store.decrypt_victim(
+                self._conn,
+                bytes(self._db_key),
+                int(self._user["id"]),
+                int(victim_id),
+            )
+        except (
+            ValueError,
+            PermissionError,
+            RuntimeError,
+            sqlite3.Error,
+            InvalidTag,
+        ) as exc:
+            QMessageBox.critical(self, "Gagal mendekripsi", f"Pesan tidak dapat dibuka: {exc}")
+            return
+        if detail is None:
+            QMessageBox.warning(self, "Data Korban", "Data korban tidak ditemukan.")
+            return
+        self._decrypted_victim_id = int(victim_id)
+        self._sync_edit_button_state({"id": int(victim_id)})
+        if self._detail_dialog is not None:
+            self._detail_dialog.show_plaintext(detail)
+            self._detail_dialog._table.viewport().update()
+        self._apply_filters()
+
+    def _reset_detail_dialog(self, *_args) -> None:
+        """Hapus referensi dialog, tapi jangan menghapus state decrypt yang sudah valid."""
+        dialog = self._detail_dialog
+        if dialog is not None:
+            dialog.clear_plaintext()
+        self._detail_dialog = None
+        if self._decrypted_victim_id is None:
+            self.edit_button.setEnabled(False)
+        else:
+            self._sync_edit_button_state({"id": int(self._decrypted_victim_id)})
+
     def clear_sensitive_state(self) -> None:
-        """Overwrite the cached database key and clear decrypted victim rows."""
+        """Tutup dialog detail dan hapus plaintext yang mungkin tersisa saat logout."""
+        dialog = self._detail_dialog
+        if dialog is not None:
+            self._detail_dialog = None
+            dialog.reject()
+            dialog.clear_plaintext()
+        self._decrypted_victim_id = None
+        self.edit_button.setEnabled(False)
         self._db_key[:] = b"\x00" * len(self._db_key)
         self._victims.clear()
         self.table.setRowCount(0)

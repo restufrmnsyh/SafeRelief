@@ -131,6 +131,43 @@ def get_victim(
     return _decrypt_victim_row(row, db_key)
 
 
+def get_victim_ciphertext(
+    conn: sqlite3.Connection,
+    user_id: int,
+    victim_id: int,
+) -> Optional[dict[str, bytes | None]]:
+    """Ambil BLOB terenkripsi 6 kolom sensitif tanpa melakukan dekripsi."""
+    require_active_user(conn, user_id, "admin")
+    row = db.get_victim_by_id(conn, victim_id)
+    if row is None:
+        return None
+    row_dict = dict(row)
+    return {
+        col: row_dict.get(f"{col}_enc")
+        for col in _VICTIM_ENC_COLS
+    }
+
+
+def decrypt_victim(
+    conn: sqlite3.Connection,
+    db_key: bytes,
+    user_id: int,
+    victim_id: int,
+) -> Optional[dict]:
+    """Dekripsi detail korban dan log aksi `VICTIM_DECRYPTED` tanpa log plaintext."""
+    require_active_user(conn, user_id, "admin")
+    victim = get_victim(conn, db_key, victim_id)
+    if victim is None:
+        return None
+    db.log_activity(
+        conn,
+        "VICTIM_DECRYPTED",
+        user_id=user_id,
+        detail=f"kode={victim['kode_korban']}",
+    )
+    return victim
+
+
 def get_victim_by_kode(
     conn: sqlite3.Connection,
     db_key: bytes,

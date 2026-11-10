@@ -9,8 +9,10 @@ from datetime import datetime
 from pathlib import Path
 
 from cryptography.exceptions import InvalidTag
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -106,12 +108,16 @@ class PhotoPage(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
 
-        self.victim_id_input = QLineEdit()
-        self.victim_id_input.setPlaceholderText("ID korban (opsional)")
-        self.posko_id_input = QLineEdit()
-        self.posko_id_input.setPlaceholderText("ID posko (opsional)")
-        self.coordinates_input = QLineEdit()
-        self.coordinates_input.setPlaceholderText("Koordinat (opsional)")
+        self.victim_combo = QComboBox()
+        self.victim_combo.addItem("Pilih korban", None)
+        for victim in secure_store.list_victims(self._conn):
+            label = f"{victim['kode_korban']} — {victim['nama_panggilan'] or '-'}"
+            self.victim_combo.addItem(label, int(victim["id"]))
+        self.posko_combo = QComboBox()
+        self.posko_combo.addItem("Pilih posko", None)
+        for posko in secure_store.list_posko(self._conn):
+            label = f"{posko['nama']} ({posko['lokasi']})"
+            self.posko_combo.addItem(label, int(posko["id"]))
         self.caption_input = QLineEdit()
         self.caption_input.setPlaceholderText("Keterangan foto")
         self._selected_image_path: Path | None = None
@@ -125,14 +131,17 @@ class PhotoPage(QWidget):
         self.extract_button.setVisible(self._role == "admin")
         self.metadata_view = QLabel("Metadata hasil ekstraksi tampil di sini.")
         self.metadata_view.setWordWrap(True)
+        self.image_view = QLabel("Preview foto akan tampil di sini.")
+        self.image_view.setMinimumHeight(220)
+        self.image_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_view.setStyleSheet("border: 1px solid #555; background: #111; color: #ddd;")
         self.status_label = QLabel()
         self.back_button = QPushButton("Kembali ke Dashboard")
         self.back_button.clicked.connect(self.dashboard_requested.emit)
 
         form = QFormLayout()
-        form.addRow("ID korban", self.victim_id_input)
-        form.addRow("ID posko", self.posko_id_input)
-        form.addRow("Koordinat", self.coordinates_input)
+        form.addRow("Korban", self.victim_combo)
+        form.addRow("Posko", self.posko_combo)
         form.addRow("Keterangan", self.caption_input)
         actions = QHBoxLayout()
         if self._role == "relawan":
@@ -148,9 +157,12 @@ class PhotoPage(QWidget):
             layout.addLayout(form)
         layout.addWidget(self.table, 1)
         layout.addLayout(actions)
+        layout.addWidget(QLabel("Preview foto"))
+        layout.addWidget(self.image_view)
         layout.addWidget(QLabel("Metadata terverifikasi"))
         layout.addWidget(self.metadata_view)
         layout.addWidget(self.status_label)
+        self.table.itemSelectionChanged.connect(self._refresh_selected_photo_preview)
         self.refresh()
 
     def choose_photo(self) -> None:
@@ -184,15 +196,14 @@ class PhotoPage(QWidget):
             QMessageBox.critical(self, "Gagal menyisipkan foto", "File foto tidak ditemukan.")
             return
         try:
-            victim_id = self._optional_id(self.victim_id_input.text(), "korban")
-            posko_id = self._optional_id(self.posko_id_input.text(), "posko")
+            victim_id = self._combo_value(self.victim_combo)
+            posko_id = self._combo_value(self.posko_combo)
             if victim_id is None and posko_id is None:
-                raise ValueError("Isi ID korban atau ID posko.")
+                raise ValueError("Pilih minimal satu data korban atau posko.")
             caption = self.caption_input.text().strip()
             payload = {
                 "victim_id": victim_id,
                 "posko_id": posko_id,
-                "coordinates": self.coordinates_input.text().strip() or None,
                 "timestamp": datetime.now().astimezone().isoformat(
                     timespec="seconds"
                 ),
@@ -222,16 +233,11 @@ class PhotoPage(QWidget):
         worker.start()
 
     @staticmethod
-    def _optional_id(value: str, label: str) -> int | None:
-        if not value.strip():
+    def _combo_value(combo: QComboBox) -> int | None:
+        data = combo.currentData()
+        if data is None:
             return None
-        try:
-            parsed = int(value)
-        except ValueError as exc:
-            raise ValueError(f"ID {label} harus berupa bilangan bulat.") from exc
-        if parsed <= 0:
-            raise ValueError(f"ID {label} harus lebih besar dari nol.")
-        return parsed
+        return int(data)
 
     def _embed_finished(self) -> None:
         worker = self._worker
@@ -313,6 +319,38 @@ class PhotoPage(QWidget):
             for column, value in enumerate(values):
                 self.table.setItem(row, column, QTableWidgetItem(str(value)))
         self.table.resizeColumnsToContents()
+        self._refresh_selected_photo_preview()
+
+    def _refresh_selected_photo_preview(self) -> None:
+        """Tampilkan gambar yang sedang dipilih di panel preview."""
+        row = self.table.currentRow()
+        if row < 0:
+            self.image_view.clear()
+            self.image_view.setText("Preview foto akan tampil di sini.")
+            return
+        photo_id = int(self.table.item(row, 0).text())
+        photo = next((item for item in self._photos if item["id"] == photo_id), None)
+        if photo is None:
+            self.image_view.clear()
+            self.image_view.setText("Foto tidak tersedia.")
+            return
+        try:
+            image_path = self._stored_image_path(str(photo["image_path"]))
+            pixmap = QPixmap(str(image_path))
+            if pixmap.isNull():
+                raise ValueError("Pixmap kosong")
+            self.image_view.setPixmap(
+                pixmap.scaled(
+                    self.image_view.width(),
+                    self.image_view.height(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+            self.image_view.setText("")
+        except (OSError, ValueError):
+            self.image_view.clear()
+            self.image_view.setText("Preview foto tidak tersedia.")
 
     def extract_selected(self) -> None:
         """Admin mengekstrak LSB dan memverifikasi tag AES-GCM metadata."""
@@ -342,6 +380,7 @@ class PhotoPage(QWidget):
         self.metadata_view.setText(
             json.dumps(metadata, ensure_ascii=False, indent=2)
         )
+        self._refresh_selected_photo_preview()
         self.status_label.setText("Foto dan metadata berhasil diverifikasi.")
 
     @staticmethod
