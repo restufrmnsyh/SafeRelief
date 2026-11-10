@@ -1,4 +1,4 @@
-"""Jendela utama SafeRelief dan gerbang dongle sebelum login."""
+"""Jendela utama SafeRelief (Kembali ke alur login asli, Dashboard modern)."""
 
 import sqlite3
 
@@ -286,19 +286,3 @@ class MainWindow(QMainWindow):
         if self.dashboard_page is not None:
             self.dashboard_page.refresh_summary()
             self.pages.setCurrentWidget(self.dashboard_page)
-
-    def closeEvent(self, event) -> None:
-        """Lepaskan kamera, koneksi DB, dan kunci sesi saat aplikasi ditutup."""
-        self._dongle_timer.stop()
-        self.login_page.stop_camera()
-        if self.volunteer_page is not None:
-            self.volunteer_page.stop_face_capture()
-        if self.photo_page is not None:
-            self.photo_page.stop_worker()
-        if self.files_page is not None:
-            self.files_page.stop_worker()
-        from auth import session
-
-        session.logout()
-        self._conn.close()
-        super().closeEvent(event)
