@@ -94,7 +94,7 @@ def test_dongle_timer_logs_out_and_removes_protected_pages(
     dongle_present["value"] = True
     window._check_dongle()
     assert window.pages.currentWidget() is window.login_page
-    assert window.login_page.gate_label.text() == "Dongle valid terdeteksi"
+    assert window.login_page.gate_label.text() == "✔ Dongle Valid Terdeteksi"
 
     session.login(
         {"id": admin_id, "username": "admin", "role": "admin"},

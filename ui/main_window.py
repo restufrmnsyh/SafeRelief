@@ -269,6 +269,22 @@ class MainWindow(QMainWindow):
             self.demo_panel_page.refresh_records()
             self.pages.setCurrentWidget(self.demo_panel_page)
 
+    def closeEvent(self, event) -> None:
+        """Bersihkan timer, session, halaman sensitif, dan koneksi DB saat jendela ditutup."""
+        from auth import session
+
+        try:
+            if hasattr(self, "_dongle_timer"):
+                self._dongle_timer.stop()
+            self._discard_authenticated_pages()
+            if session.is_logged_in():
+                session.logout()
+            if getattr(self, "_conn", None) is not None:
+                self._conn.close()
+                self._conn = None
+        finally:
+            super().closeEvent(event)
+
     def _return_to_dashboard(self) -> None:
         from auth import session
 
