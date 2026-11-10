@@ -42,54 +42,14 @@ def test_second_admin_is_rejected_before_prompting(
     assert "admin sudah terdaftar" in capsys.readouterr().out
 
 
-def test_webcam_failure_rolls_back_inserted_admin(
-    setup_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_bootstrap_success_without_face_capture(
+    setup_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
         setup_admin.dongle, "find_removable_drives", lambda: ["D:\\"]
     )
-    answers = iter(
-        ["1", "Admin Baru", "admin-baru", str(tmp_path / "recovery.key")]
-    )
 
-    def answer_input(prompt: str) -> str:
-        assert prompt
-        return next(answers)
-
-    monkeypatch.setattr("builtins.input", answer_input)
-    secrets = iter(
-        [
-            "admin-pass-123",
-            "admin-pass-123",
-            "recovery-pass-123",
-            "recovery-pass-123",
-        ]
-    )
-    def answer_password(prompt: str) -> str:
-        assert prompt
-        return next(secrets)
-
-    monkeypatch.setattr(setup_admin.getpass, "getpass", answer_password)
-    monkeypatch.setattr(
-        setup_admin.face_auth,
-        "capture_encodings",
-        lambda: (_ for _ in ()).throw(ValueError("webcam gagal")),
-    )
-
-    assert setup_admin.main() == 1
-    with db.get_connection(setup_db) as conn:
-        assert db.count_admins(conn) == 0
-        assert db.get_user_by_username(conn, "admin-baru") is None
-
-
-def test_bootstrap_success_persists_encrypted_face_and_audit_log(
-    setup_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import numpy as np
-
-    monkeypatch.setattr(
-        setup_admin.dongle, "find_removable_drives", lambda: ["D:\\"]
-    )
     def fake_serial(drive: str) -> str:
         assert drive == "D:\\"
         return "AABB1122"
@@ -103,8 +63,9 @@ def test_bootstrap_success_persists_encrypted_face_and_audit_log(
     monkeypatch.setattr(
         setup_admin.face_auth,
         "capture_encodings",
-        lambda: np.ones(128, dtype=np.float32),
+        lambda: (_ for _ in ()).throw(AssertionError("setup_admin tidak boleh menangkap wajah")),
     )
+
     def create_recovery(master: bytes, password: str, output: str) -> None:
         assert len(master) == config.MASTER_KEY_LENGTH
         assert password == "recovery-pass-123"
@@ -130,6 +91,7 @@ def test_bootstrap_success_persists_encrypted_face_and_audit_log(
             "recovery-pass-123",
         ]
     )
+
     def answer_password(prompt: str) -> str:
         assert prompt
         return next(secrets)
@@ -137,11 +99,13 @@ def test_bootstrap_success_persists_encrypted_face_and_audit_log(
     monkeypatch.setattr(setup_admin.getpass, "getpass", answer_password)
 
     assert setup_admin.main() == 0
+    captured = capsys.readouterr().out
+    assert "Pendaftaran wajah akan dilakukan saat login pertama di aplikasi." in captured
     with db.get_connection(setup_db) as conn:
         admin = db.get_user_by_username(conn, "admin-baru")
         assert admin is not None
         assert admin["role"] == "admin"
-        assert admin["face_encoding_enc"] is not None
+        assert admin["face_encoding_enc"] is None
         assert admin["wrapped_master_key"] is not None
         assert admin["kdf_salt"] is not None
         events = db.list_activity_log(conn)

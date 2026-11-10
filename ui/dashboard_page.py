@@ -5,9 +5,11 @@ import sqlite3
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -100,6 +102,65 @@ class DashboardPage(QWidget):
         posko_layout.addWidget(self.posko_summary_label)
 
         main_layout.addWidget(self.posko_card)
+
+        nav_card = QFrame()
+        nav_card.setStyleSheet(
+            "background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 16px;"
+        )
+        nav_layout = QVBoxLayout(nav_card)
+        nav_title = QLabel("Navigasi Akses Cepat")
+        nav_title.setStyleSheet("font-size: 15px; font-weight: 700; color: #0F172A;")
+        nav_layout.addWidget(nav_title)
+
+        navigation_map = {
+            "admin": [
+                ("victims", "Data Korban"),
+                ("volunteers", "Manajemen Relawan"),
+                ("posko", "Manajemen Posko"),
+                ("chat", "Chat Koordinasi"),
+                ("photos", "Dokumentasi Foto"),
+                ("files", "Berkas Laporan"),
+                ("aid", "Distribusi Bantuan"),
+                ("activity", "Log Aktivitas"),
+                ("demo", "Panel Demo"),
+            ],
+            "relawan": [
+                ("victims", "Data Korban"),
+                ("chat", "Chat Koordinasi"),
+                ("photos", "Dokumentasi Foto"),
+                ("files", "Berkas Laporan"),
+                ("aid", "Distribusi Bantuan"),
+            ],
+        }
+
+        button_grid = QGridLayout()
+        button_grid.setHorizontalSpacing(12)
+        button_grid.setVerticalSpacing(12)
+        for index, (page_name, label) in enumerate(navigation_map.get(role, [])):
+            button = QPushButton(label)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setStyleSheet(
+                "QPushButton {"
+                "background-color: #FFFFFF;"
+                "color: #0F172A;"
+                "border: 1px solid #E2E8F0;"
+                "border-radius: 10px;"
+                "padding: 12px 14px;"
+                "text-align: left;"
+                "font-weight: 600;"
+                "font-size: 12px;"
+                "}"
+                "QPushButton:hover {"
+                "background-color: #F8FAFC;"
+                "border: 1px solid #CBD5E1;"
+                "}"
+            )
+            button.clicked.connect(lambda checked=False, page=page_name: self.page_requested.emit(page))
+            row, col = divmod(index, 2)
+            button_grid.addWidget(button, row, col)
+
+        nav_layout.addLayout(button_grid)
+        main_layout.addWidget(nav_card)
         main_layout.addStretch()
 
         self.refresh_summary()

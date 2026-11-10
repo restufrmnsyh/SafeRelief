@@ -291,10 +291,26 @@ def list_posko(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return cur.fetchall()
 
 
+def update_posko(
+    conn: sqlite3.Connection,
+    posko_id: int,
+    data: dict,
+    *,
+    commit: bool = True,
+) -> None:
+    """Perbarui kolom dasar posko tanpa menyentuh data sensitif lain."""
+    conn.execute(
+        "UPDATE posko SET nama = ?, lokasi = ?, kapasitas = ? WHERE id = ?",
+        (data["nama"], data["lokasi"], data.get("kapasitas", 0), posko_id),
+    )
+    if commit:
+        conn.commit()
+
+
 def delete_posko(conn: sqlite3.Connection, posko_id: int) -> None:
     """
-    Hapus posko. Gagal jika masih ada user/victim yang mereferensikannya
-    dan foreign key aktif.
+    Hapus posko. Karena schema memakai ON DELETE SET NULL untuk child records,
+    data pengguna/korban yang terikat akan tetap ada dengan posko_id NULL.
     """
     conn.execute("DELETE FROM posko WHERE id = ?", (posko_id,))
     conn.commit()

@@ -7,7 +7,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
 
 import config
 from auth import dongle, session, volunteers
@@ -115,6 +115,43 @@ def test_dongle_timer_logs_out_and_removes_protected_pages(
     assert window.dashboard_page is None
     assert window.pages.currentWidget() is window.gate_page
     assert window.gate_status.text() == "Dongle dicabut, sesi diakhiri"
+    window.close()
+    qapp.processEvents()
+
+
+def test_dashboard_exposes_role_based_navigation_buttons(
+    admin_context, qapp
+) -> None:
+    conn, admin_id, _volunteer_id = admin_context
+    session.login(
+        {"id": admin_id, "username": "admin", "role": "admin"},
+        os.urandom(config.MASTER_KEY_LENGTH),
+    )
+    window = MainWindow()
+    window._show_dashboard(session.get_current_user())
+
+    assert window.dashboard_page is not None
+    button_texts = {
+        button.text()
+        for button in window.dashboard_page.findChildren(QPushButton)
+        if isinstance(button, QPushButton)
+    }
+    assert "Data Korban" in button_texts
+    assert "Manajemen Relawan" in button_texts
+    assert "Chat Koordinasi" in button_texts
+    assert "Dokumentasi Foto" in button_texts
+    assert "Berkas Laporan" in button_texts
+    assert "Distribusi Bantuan" in button_texts
+    assert "Log Aktivitas" in button_texts
+    assert "Panel Demo" in button_texts
+
+    triggered: list[str] = []
+    window.dashboard_page.page_requested.connect(triggered.append)
+    for button in window.dashboard_page.findChildren(QPushButton):
+        if button.text() == "Data Korban":
+            button.click()
+            break
+    assert triggered == ["victims"]
     window.close()
     qapp.processEvents()
 

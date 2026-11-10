@@ -31,6 +31,32 @@ from typing import Optional
 import cv2
 import numpy as np
 
+
+def _open_camera(index: int = 0) -> cv2.VideoCapture:
+    """Buka webcam dengan backend Windows DirectShow terlebih dahulu."""
+    candidate_backends = []
+    if hasattr(cv2, "CAP_DSHOW"):
+        candidate_backends.append(cv2.CAP_DSHOW)
+    if hasattr(cv2, "CAP_MSMF"):
+        candidate_backends.append(cv2.CAP_MSMF)
+    candidate_backends.extend([cv2.CAP_ANY, -1])
+
+    for backend in candidate_backends:
+        try:
+            cap = cv2.VideoCapture(index, backend)
+        except cv2.error:
+            continue
+        if cap.isOpened():
+            return cap
+
+    cap = cv2.VideoCapture(index)
+    if cap.isOpened():
+        return cap
+    raise ValueError(
+        "Webcam tidak dapat dibuka. Pastikan kamera tercolok dan "
+        "tidak dipakai aplikasi lain."
+    )
+
 import config
 
 
@@ -166,12 +192,7 @@ def capture_encodings(n: int = None) -> np.ndarray:
     if n is None:
         n = config.FACE_CAPTURE_FRAMES
 
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        raise ValueError(
-            "Webcam tidak dapat dibuka. Pastikan kamera tercolok dan "
-            "tidak dipakai aplikasi lain."
-        )
+    cap = _open_camera(0)
 
     embeddings = []
     max_attempts = n * 10  # beri toleransi frame tanpa wajah

@@ -80,14 +80,6 @@ def _bootstrap_admin(
             commit=False,
         )
 
-        # Simpan embedding hanya setelah dienkripsi dengan kunci database.
-        encoding = face_auth.capture_encodings()
-        face_key = keys.derive_key(master_key, config.HKDF_LABEL_DB)
-        encrypted_encoding = aes_module.encrypt(
-            face_auth.encoding_to_bytes(encoding), face_key
-        )
-        db.update_user_face(conn, user_id, encrypted_encoding, commit=False)
-
         token = dongle.provision_dongle(conn, drive, user_id, commit=False)
         salt = os.urandom(16)
         wrapped_master_key = keys.wrap_master_key(
@@ -180,6 +172,7 @@ def main() -> int:
             return 1
 
         print(f"Admin '{username}' berhasil dibuat.")
+        print("Pendaftaran wajah akan dilakukan saat login pertama di aplikasi.")
         print(f"Simpan file recovery secara offline: {recovery_path}")
         return 0
     finally:

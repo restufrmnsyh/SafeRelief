@@ -52,6 +52,7 @@ Fitur per peran:
 | Fitur | Admin | Relawan |
 |---|---|---|
 | Buat/edit/aktifkan/blokir relawan, ganti dongle | Ya | Tidak |
+| Manajemen posko (tambah/edit/hapus) | Ya | Tidak |
 | Chat terenkripsi | Ya (pilih relawan dari daftar) | Ya (selalu ke admin, penerima otomatis) |
 | Data korban | Lihat semua, edit | Input dan lihat |
 | Foto stego | Ekstrak/verifikasi | Unggah dan sisipkan |
@@ -156,7 +157,7 @@ Kunci turunan dihitung di memori, tidak pernah ditulis ke disk atau database. Di
 - Keterbatasan (dicatat di laporan): file kunci bisa disalin (tetap butuh password untuk membuka master key), serial berubah jika diformat.
 
 ### 6.7 Admin awal (`setup_admin.py`)
-Dijalankan sekali dari terminal. Menolak jalan jika admin sudah ada. Langkah: init DB, minta username/password (`getpass`, konfirmasi, min 8 karakter), hash Argon2, provision dongle, tangkap wajah (5 frame), buat master key lalu bungkus dengan KEK (password + token dongle), buat **`recovery.key`** (minta password pemulihan terpisah, simpan di lokasi yang dipilih admin), insert admin. **Atomik**: gagal di tengah berarti tidak ada yang tersimpan. Catat `ADMIN_BOOTSTRAP`.
+Dijalankan sekali dari terminal. Menolak jalan jika admin sudah ada. Langkah: init DB, minta username/password (`getpass`, konfirmasi, min 8 karakter), hash Argon2, provision dongle, buat master key lalu bungkus dengan KEK (password + token dongle), buat **`recovery.key`** (minta password pemulihan terpisah, simpan di lokasi yang dipilih admin), insert admin. **Tidak ada capture wajah di setup_admin.py**; admin dibuat dengan `face_encoding_enc = NULL` dan wajah didaftarkan saat login pertama di aplikasi. **Atomik**: gagal di tengah berarti tidak ada yang tersimpan. Catat `ADMIN_BOOTSTRAP`.
 
 `reset_admin.py` (opsional): dijalankan di komputer server dengan akses fisik; memakai `recovery.key` + password pemulihan untuk membuka master key, lalu mendaftarkan dongle dan password admin baru.
 
@@ -179,7 +180,7 @@ safe_relief/
 │                hashing.py, keys.py, super_encrypt.py, stego_lsb.py, blockchain.py
 ├── auth/        dongle.py, face_auth.py, login.py, session.py
 ├── database/    schema.sql, db.py, secure_store.py
-├── ui/          halaman-halaman PySide6
+├── ui/          halaman-halaman PySide6 (dashboard, posko, relawan, korban, chat, dll.)
 ├── models/      model YuNet + SFace (.onnx)
 ├── data/        saferelief.db (jangan di-commit)
 ├── storage/     file .enc (jangan di-commit)

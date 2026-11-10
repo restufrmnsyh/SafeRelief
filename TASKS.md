@@ -59,7 +59,8 @@ Satu halaman per sesi. UI hanya memanggil `secure_store`/`auth`, tanpa SQL.
 - [x] 5.8 Distribusi bantuan (catat, riwayat, Validasi Chain, Simulasi Tampering)
 - [x] 5.9 Manajemen relawan (admin: buat, edit, aktif/blokir, daftar wajah, daftar/ganti dongle; ganti dongle dan reset password membungkus ulang master key)
 - [x] 5.10 Log aktivitas (admin)
-- [x] 5.11 Panel Demo: ciphertext vs plaintext berdampingan
+- [ ] 5.11 Panel Demo: ciphertext vs plaintext berdampingan
+- [ ] 5.12 Manajemen posko (admin: tambah, edit, hapus, hitung relawan/korban terkait, konfirmasi saat masih dipakai)
 - **Lulus:** tiap halaman bisa dipakai tanpa error dan UI tidak membeku.
 
 ## Tahap 6: Integrasi

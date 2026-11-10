@@ -1,6 +1,7 @@
 """Halaman login tiga faktor dengan tampilan Web App Full White Screen terpusat."""
 
 import sqlite3
+from collections import deque
 
 import cv2
 import numpy as np
@@ -30,7 +31,7 @@ class CameraWorker(QThread):
     camera_error = Signal(str)
 
     def run(self) -> None:
-        camera = cv2.VideoCapture(0)
+        camera = face_auth._open_camera(0)
         try:
             if not camera.isOpened():
                 self.camera_error.emit("Webcam tidak dapat dibuka.")
@@ -94,10 +95,13 @@ class LoginPage(QWidget):
         self._gate_open = False
         self._preauth_user: dict[str, object] | None = None
         self._transient_master_key: bytearray | None = None
+        self._preauth_db_key: bytes | None = None
         self._stored_encoding: np.ndarray | None = None
         self._last_frame: np.ndarray | None = None
+        self._recent_frames: deque[np.ndarray] = deque(maxlen=6)
         self._camera_worker: CameraWorker | None = None
         self._face_worker: FaceVerificationWorker | None = None
+        self._registration_mode = False
 
         # Full White Screen Background
         self.setStyleSheet("background-color: #FFFFFF; color: #0F172A;")
@@ -322,6 +326,7 @@ class LoginPage(QWidget):
 
         self.submit_button.setEnabled(False)
         master_key: bytearray | None = None
+        db_key: bytes | None = None
         try:
             user = login.authenticate(self._conn, username, password)
             token = dongle.verify_dongle(user)
@@ -335,31 +340,49 @@ class LoginPage(QWidget):
                     bytes(wrapped), password, token, bytes(salt)
                 )
             )
-            db_key = keys.derive_key(
-                bytes(master_key), config.HKDF_LABEL_DB
-            )
+            db_key = keys.derive_key(bytes(master_key), config.HKDF_LABEL_DB)
             encoding_bytes = secure_store.load_face_encoding(
                 self._conn, db_key, int(user["id"])
             )
-            if encoding_bytes is None:
-                raise ValueError("Wajah belum terdaftar untuk akun ini.")
 
             self._preauth_user = user
             self._transient_master_key = master_key
+            self._preauth_db_key = db_key
             master_key = None
-            self._stored_encoding = face_auth.bytes_to_encoding(encoding_bytes)
+            db_key = None
+
             self._start_camera()
-            self.message_label.setStyleSheet("color: #059669; font-size: 11px; font-weight: 600; border: none;")
+            if encoding_bytes is None:
+                self._registration_mode = True
+                self._set_face_controls_visible(True)
+                self.message_label.setStyleSheet(
+                    "color: #0F766E; font-size: 11px; font-weight: 600; border: none;"
+                )
+                self.message_label.setText(
+                    "Wajah belum terdaftar. Posisikan wajah di kamera lalu klik 'Daftarkan Wajah'."
+                )
+                return
+
+            self._registration_mode = False
+            self._stored_encoding = face_auth.bytes_to_encoding(encoding_bytes)
+            self._set_face_controls_visible(True)
+            self.message_label.setStyleSheet(
+                "color: #059669; font-size: 11px; font-weight: 600; border: none;"
+            )
             self.message_label.setText(
                 "Kredensial valid. Tatap kamera & verifikasi."
             )
         except (ValueError, OSError, sqlite3.Error, InvalidTag) as exc:
             self._clear_pre_auth()
-            self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
+            self.message_label.setStyleSheet(
+                "color: #DC2626; font-size: 11px; font-weight: 600; border: none;"
+            )
             self.message_label.setText(str(exc))
         finally:
             if master_key is not None:
                 master_key[:] = b"\x00" * len(master_key)
+            if db_key is not None:
+                db_key = b"\x00" * len(db_key)
             self.password_input.clear()
             self.submit_button.setEnabled(True)
 
@@ -382,7 +405,9 @@ class LoginPage(QWidget):
             self._camera_worker = None
 
     def _display_frame(self, image: QImage) -> None:
-        self._last_frame = self._qimage_to_bgr(image)
+        frame = self._qimage_to_bgr(image)
+        self._last_frame = frame
+        self._recent_frames.append(frame.copy())
         pixmap = QPixmap.fromImage(image).scaled(
             self.camera_label.size(),
             Qt.AspectRatioMode.KeepAspectRatio,
@@ -421,16 +446,71 @@ class LoginPage(QWidget):
             )
         super().resizeEvent(event)
 
-    def verify_current_face(self) -> None:
-        if (
-            not self._gate_open
-            or self._stored_encoding is None
-            or self._last_frame is None
-        ):
+    def register_current_face(self) -> None:
+        """Daftarkan wajah pengguna dari feed kamera aktif tanpa membuka webcam baru."""
+        if not self._gate_open or self._preauth_user is None:
             self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
-            self.message_label.setText(
-                "Tunggu sampai frame webcam tersedia."
+            self.message_label.setText("Sesi pendaftaran wajah belum siap.")
+            return
+
+        embeddings: list[np.ndarray] = []
+        for frame in self._recent_frames:
+            emb = face_auth._detect_and_embed(frame)
+            if emb is not None:
+                embeddings.append(emb)
+
+        if not embeddings and self._last_frame is not None:
+            emb = face_auth._detect_and_embed(self._last_frame)
+            if emb is not None:
+                embeddings.append(emb)
+
+        if not embeddings:
+            self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
+            self.message_label.setText("Wajah tidak terdeteksi di feed kamera. Posisikan wajah dengan jelas.")
+            return
+
+        user = self._preauth_user
+        master_key = self._transient_master_key
+        db_key = self._preauth_db_key
+        if user is None or master_key is None or db_key is None:
+            self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
+            self.message_label.setText("Sesi pendaftaran wajah sudah kedaluwarsa.")
+            self._clear_pre_auth()
+            return
+
+        try:
+            average_encoding = np.mean(embeddings, axis=0).astype(np.float32)
+            secure_store.save_face_encoding(
+                self._conn,
+                db_key,
+                int(user["id"]),
+                face_auth.encoding_to_bytes(average_encoding),
             )
+            self._stored_encoding = average_encoding
+            self._registration_mode = False
+            self._set_face_controls_visible(True)
+            self.message_label.setStyleSheet("color: #059669; font-size: 11px; font-weight: 600; border: none;")
+            self.message_label.setText("Wajah berhasil didaftarkan. Lanjutkan verifikasi wajah.")
+            session.login(user, bytes(master_key))
+            self._clear_pre_auth()
+            self.authenticated.emit(user)
+        except (ValueError, OSError, sqlite3.Error, cv2.error) as exc:
+            self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
+            self.message_label.setText(str(exc))
+
+    def verify_current_face(self) -> None:
+        if not self._gate_open:
+            self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
+            self.message_label.setText("Tunggu sampai frame webcam tersedia.")
+            return
+
+        if self._registration_mode:
+            self.register_current_face()
+            return
+
+        if self._stored_encoding is None or self._last_frame is None:
+            self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
+            self.message_label.setText("Tunggu sampai frame webcam tersedia.")
             return
         if self._face_worker is not None and self._face_worker.isRunning():
             return
@@ -499,15 +579,26 @@ class LoginPage(QWidget):
         # Kamera tetap terlihat di UI agar tata letak tidak bergeser/kosong sebelah
         if not visible:
             self.camera_label.setText("Isi form & klik 'Lanjutkan'")
+            self.verify_face_button.setText("Verifikasi Wajah")
             self.verify_face_button.setEnabled(False)
+            return
+
+        if self._registration_mode:
+            self.verify_face_button.setText("Daftarkan Wajah")
+        else:
+            self.verify_face_button.setText("Verifikasi Wajah")
+        self.verify_face_button.setEnabled(True)
 
     def _clear_pre_auth(self) -> None:
         self.stop_camera()
+        self._registration_mode = False
+        self._recent_frames.clear()
         if self._transient_master_key is not None:
             self._transient_master_key[:] = b"\x00" * len(
                 self._transient_master_key
             )
         self._transient_master_key = None
+        self._preauth_db_key = None
         self._preauth_user = None
         self._stored_encoding = None
         self._last_frame = None

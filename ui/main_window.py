@@ -16,6 +16,7 @@ from ui.demo_panel_page import DemoPanelPage
 from ui.files_page import FilesPage
 from ui.login_page import LoginPage
 from ui.photo_page import PhotoPage
+from ui.posko_management_page import PoskoManagementPage
 from ui.victims_page import VictimsPage
 from ui.volunteer_management_page import VolunteerManagementPage
 
@@ -50,6 +51,7 @@ class MainWindow(QMainWindow):
         self.dashboard_page: DashboardPage | None = None
         self.victims_page: VictimsPage | None = None
         self.volunteer_page: VolunteerManagementPage | None = None
+        self.posko_page: PoskoManagementPage | None = None
         self.chat_page: ChatPage | None = None
         self.photo_page: PhotoPage | None = None
         self.files_page: FilesPage | None = None
@@ -133,9 +135,9 @@ class MainWindow(QMainWindow):
             self.files_page.stop_worker(cancel_pending=True)
 
         names = (
-            "dashboard_page", "victims_page", "volunteer_page", "chat_page",
-            "photo_page", "files_page", "aid_page", "activity_log_page",
-            "demo_panel_page",
+            "dashboard_page", "victims_page", "volunteer_page", "posko_page",
+            "chat_page", "photo_page", "files_page", "aid_page",
+            "activity_log_page", "demo_panel_page",
         )
         for name in names:
             page = getattr(self, name)
@@ -187,7 +189,7 @@ class MainWindow(QMainWindow):
             return
         allowed_pages = {
             "admin": {
-                "victims", "volunteers", "chat", "photos", "files",
+                "victims", "volunteers", "posko", "chat", "photos", "files",
                 "aid", "activity", "demo",
             },
             "relawan": {"victims", "chat", "photos", "files", "aid"},
@@ -214,6 +216,15 @@ class MainWindow(QMainWindow):
                 self.pages.addWidget(self.volunteer_page)
             self.volunteer_page.refresh()
             self.pages.setCurrentWidget(self.volunteer_page)
+        elif page_name == "posko":
+            if self.posko_page is None:
+                self.posko_page = PoskoManagementPage(self._conn, self)
+                self.posko_page.dashboard_requested.connect(
+                    self._return_to_dashboard
+                )
+                self.pages.addWidget(self.posko_page)
+            self.posko_page.refresh()
+            self.pages.setCurrentWidget(self.posko_page)
         elif page_name == "chat":
             if self.chat_page is None:
                 self.chat_page = ChatPage(self._conn, self)
