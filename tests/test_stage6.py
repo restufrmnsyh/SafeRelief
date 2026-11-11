@@ -7,7 +7,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
 import config
 from auth import dongle, session, volunteers
@@ -120,14 +120,19 @@ def test_dongle_timer_logs_out_and_removes_protected_pages(
 
 
 def test_dashboard_exposes_role_based_navigation_buttons(
-    admin_context, qapp
+    admin_context, monkeypatch: pytest.MonkeyPatch, qapp, tmp_path: Path
 ) -> None:
     conn, admin_id, _volunteer_id = admin_context
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "stage6.db")
+    get_connection = db.get_connection
+    monkeypatch.setattr(
+        db, "get_connection", lambda: get_connection(config.DB_PATH)
+    )
+    window = MainWindow()
     session.login(
         {"id": admin_id, "username": "admin", "role": "admin"},
         os.urandom(config.MASTER_KEY_LENGTH),
     )
-    window = MainWindow()
     window._show_dashboard(session.get_current_user())
 
     assert window.dashboard_page is not None
@@ -152,6 +157,49 @@ def test_dashboard_exposes_role_based_navigation_buttons(
             button.click()
             break
     assert triggered == ["victims"]
+    window.close()
+    qapp.processEvents()
+
+
+def test_dashboard_manual_logout_confirms_and_returns_to_gate(
+    admin_context, monkeypatch: pytest.MonkeyPatch, qapp, tmp_path: Path
+) -> None:
+    conn, admin_id, _volunteer_id = admin_context
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "stage6.db")
+    get_connection = db.get_connection
+    monkeypatch.setattr(
+        db, "get_connection", lambda: get_connection(config.DB_PATH)
+    )
+    monkeypatch.setattr(dongle, "is_any_valid_dongle_present", lambda _conn: True)
+
+    window = MainWindow()
+    session.login(
+        {"id": admin_id, "username": "admin", "role": "admin"},
+        os.urandom(config.MASTER_KEY_LENGTH),
+    )
+    window._show_dashboard(session.get_current_user())
+
+    logout_called = {"value": False}
+    real_logout = session.logout
+
+    def spy_logout() -> None:
+        logout_called["value"] = True
+        real_logout()
+
+    monkeypatch.setattr(session, "logout", spy_logout)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+
+    assert window.dashboard_page is not None
+    assert window.dashboard_page.logout_button.text() == "Logout"
+    window.dashboard_page.logout_button.click()
+
+    assert logout_called["value"] is True
+    assert not session.is_logged_in()
+    assert window.pages.currentWidget() in (window.gate_page, window.login_page)
     window.close()
     qapp.processEvents()
 

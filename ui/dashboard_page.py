@@ -64,10 +64,20 @@ class DashboardPage(QWidget):
             "background-color: #FEF2F2; color: #EF4444; font-weight: 800; "
             "font-size: 11px; padding: 6px 14px; border-radius: 20px; border: 1px solid #FCA5A5;"
         )
+        self.logout_button = QPushButton("Logout")
+        self.logout_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.logout_button.setStyleSheet(
+            "QPushButton {"
+            "background-color: #111827; color: #F9FAFB; border: none; border-radius: 10px; "
+            "padding: 8px 14px; font-weight: 700; font-size: 11px; }"
+            "QPushButton:hover { background-color: #1F2937; }"
+        )
+        self.logout_button.clicked.connect(self._confirm_logout)
 
         hero_layout.addLayout(hero_text_layout)
         hero_layout.addStretch()
         hero_layout.addWidget(self.role_badge, alignment=Qt.AlignmentFlag.AlignCenter)
+        hero_layout.addWidget(self.logout_button, alignment=Qt.AlignmentFlag.AlignCenter)
 
         main_layout.addWidget(hero_card)
 
@@ -222,6 +232,23 @@ class DashboardPage(QWidget):
         self.posko_summary_label.setText(
             " • ".join(posko_lines) if posko_lines else "Belum ada posko terdaftar."
         )
+
+    def _confirm_logout(self) -> None:
+        """Konfirmasi logout manual dan delegasikan seluruh flow ke MainWindow."""
+        parent = self.parent()
+        window = self.window()
+        dialog_parent = parent if parent is not None else window
+        if dialog_parent is None:
+            return
+        reply = QMessageBox.question(
+            dialog_parent,
+            "Logout",
+            "Yakin ingin logout?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            if hasattr(window, "_end_session"):
+                window._end_session("Logout manual dari dashboard.")
 
     def clear_sensitive_state(self) -> None:
         self.welcome_label.clear()
