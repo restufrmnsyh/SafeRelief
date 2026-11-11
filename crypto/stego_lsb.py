@@ -114,8 +114,16 @@ def embed(cover_path: str, payload: bytes, out_path: str) -> Path:
     if len(payload) == 0:
         raise ValueError("Payload tidak boleh kosong.")
 
-    with Image.open(cover_path) as img:
-        img_rgb = img.convert("RGB")   # alpha DIBUANG di sini
+    try:
+        with Image.open(cover_path) as img:
+            img_rgb = img.convert("RGB")   # alpha DIBUANG di sini
+    except (OSError, ValueError) as exc:
+        message = str(exc).lower()
+        if src.suffix.lower() == ".webp" or "webp" in message:
+            raise ValueError(
+                "Format WEBP ini tidak dapat diproses, coba format lain"
+            ) from exc
+        raise
     w, h = img_rgb.size
 
     # --- validasi kapasitas ---

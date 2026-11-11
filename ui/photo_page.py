@@ -177,7 +177,7 @@ class PhotoPage(QWidget):
         if not self._authorized("relawan"):
             return
         source, _ = QFileDialog.getOpenFileName(
-            self, "Pilih foto", "", "Gambar (*.png *.jpg *.jpeg *.bmp)"
+            self, "Pilih foto", "", "Gambar (*.png *.jpg *.jpeg *.webp)"
         )
         if source:
             self._selected_image_path = Path(source)

@@ -154,6 +154,20 @@ class TestStego:
         recovered = stego_lsb.extract(str(actual_out))
         assert recovered == payload
 
+    def test_webp_decode_failure_raises_clear_message(self, monkeypatch, tmp_path):
+        """WEBP yang tidak bisa diproses harus menampilkan pesan jelas, bukan crash raw."""
+        webp = tmp_path / "cover.webp"
+        webp.write_bytes(b"not-a-real-webp")
+        payload = b"test webp"
+
+        def fake_open(*args, **kwargs):
+            raise OSError("decoder not available")
+
+        monkeypatch.setattr("PIL.Image.open", fake_open)
+
+        with pytest.raises(ValueError, match="Format WEBP ini tidak dapat diproses"):
+            stego_lsb.embed(str(webp), payload, str(tmp_path / "stego.png"))
+
     def test_modified_stego_raises(self, tmp_path):
         """
         Gambar stego yang dimodifikasi pada piksel area data harus
