@@ -133,6 +133,8 @@ class FilesPage(QWidget):
         self.upload_button = QPushButton("Unggah Berkas")
         self.upload_button.setVisible(self._role == "relawan")
         self.upload_button.clicked.connect(self.choose_and_upload)
+        self.delete_button = QPushButton("Hapus")
+        self.delete_button.clicked.connect(self.delete_selected_file)
         self.status_label = QLabel()
         self.back_button = QPushButton("Kembali ke Dashboard")
         self.back_button.clicked.connect(self.dashboard_requested.emit)
@@ -140,6 +142,8 @@ class FilesPage(QWidget):
         actions = QHBoxLayout()
         if self._role == "relawan":
             actions.addWidget(self.upload_button)
+        if self._role == "admin":
+            actions.addWidget(self.delete_button)
         actions.addStretch()
         actions.addWidget(self.back_button)
         layout = QVBoxLayout(self)
@@ -275,6 +279,42 @@ class FilesPage(QWidget):
         if destination:
             shutil.copy2(source_path, destination)
             self.status_label.setText(f"Berkas disimpan ke {Path(destination).name}.")
+
+    def delete_selected_file(self) -> None:
+        """Hapus berkas yang dipilih dengan konfirmasi dan bersihkan file terenkripsi."""
+        if not self._authorized():
+            return
+        row = self.table.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Hapus berkas", "Pilih berkas terlebih dahulu.")
+            return
+        file_id = int(self.table.item(row, 0).text())
+        metadata = next((item for item in self._files if item["id"] == file_id), None)
+        if metadata is None:
+            QMessageBox.warning(self, "Hapus berkas", "Berkas tidak ditemukan.")
+            return
+        answer = QMessageBox.question(
+            self,
+            "Konfirmasi hapus berkas",
+            "Yakin ingin menghapus berkas ini? File terenkripsi yang terkait juga akan dihapus.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            encrypted_path = self._stored_file_path(str(metadata["path_enc"]))
+            secure_store.delete_file(
+                self._conn,
+                user_id=self._user_id,
+                role=self._role,
+                file_id=file_id,
+            )
+            encrypted_path.unlink(missing_ok=True)
+            self._decrypted_file_cache.pop(file_id, None)
+            self._decrypted_file_id = None
+            self.status_label.setText("Berkas berhasil dihapus.")
+            self.refresh()
+        except (PermissionError, ValueError, sqlite3.Error, OSError) as exc:
+            QMessageBox.critical(self, "Gagal menghapus berkas", str(exc))
 
     def _decrypt_selected_file(self, file_id: int) -> None:
         """Dekripsi file ke lokasi sementara agar admin bisa melihat nama asli sebelum unduh."""

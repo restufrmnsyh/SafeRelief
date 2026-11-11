@@ -170,6 +170,60 @@ class TestConstraints:
         row = db.get_user_by_id(conn, uid)
         assert row["posko_id"] is None
 
+    def test_delete_victim_and_delete_user_removes_rows(self, conn):
+        """Hapus korban dan user permanen harus menghapus baris dan data terkait."""
+        posko_id = _make_posko(conn)
+        admin_id = _make_user(conn, username="admin_del", role="admin")
+        volunteer_id = _make_user(conn, username="staff_del", role="relawan")
+        victim_id = db.insert_victim(conn, {
+            "kode_korban": "K-DEL",
+            "nama_panggilan": "Sari",
+            "status": "selamat",
+            "posko_id": posko_id,
+            "created_by": volunteer_id,
+        })
+        db.insert_message(conn, {
+            "sender_id": volunteer_id,
+            "receiver_id": admin_id,
+            "ciphertext": b"blob-message",
+        })
+
+        db.delete_victim(conn, victim_id)
+        assert db.get_victim_by_id(conn, victim_id) is None
+
+        db.delete_user(conn, volunteer_id)
+        assert db.get_user_by_id(conn, volunteer_id) is None
+        assert db.get_messages_between(conn, volunteer_id, admin_id) == []
+
+    def test_delete_photo_and_file_removes_records(self, conn, tmp_path):
+        """Hapus foto dan file harus menghapus record serta file yang terkait."""
+        victim_id = db.insert_victim(conn, {
+            "kode_korban": "K-IMG",
+            "nama_panggilan": "Dina",
+            "status": "selamat",
+        })
+        photo_id = db.insert_photo(conn, {
+            "victim_id": victim_id,
+            "posko_id": None,
+            "image_path": "photo.png",
+            "original_hash": "abc",
+            "keterangan": "uji",
+            "uploaded_by": None,
+        })
+        file_id = db.insert_file(conn, {
+            "uploader_id": None,
+            "nama_asli": "laporan.pdf",
+            "path_enc": "report.enc",
+            "ukuran": 123,
+            "file_hash": "def",
+        })
+
+        db.delete_photo(conn, photo_id)
+        assert db.get_photo_by_id(conn, photo_id) is None
+
+        db.delete_file(conn, file_id)
+        assert db.get_file_by_id(conn, file_id) is None
+
 
 # ─────────────────────────────────────────────────────────────────────
 # Tes: Enkripsi kolom victim

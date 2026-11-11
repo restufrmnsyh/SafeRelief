@@ -380,6 +380,31 @@ def save_photo(
     })
 
 
+def delete_photo(
+    conn: sqlite3.Connection,
+    *,
+    user_id: int,
+    role: str,
+    photo_id: int,
+) -> None:
+    """Hapus foto jika admin atau pemilik unggah relawan."""
+    user = require_active_user(conn, user_id, role)
+    row = db.get_photo_by_id(conn, photo_id)
+    if row is None:
+        raise ValueError("Foto tidak ditemukan.")
+    if role == "admin":
+        pass
+    elif int(row["uploaded_by"]) != int(user["id"]):
+        raise PermissionError("Relawan hanya dapat menghapus foto miliknya sendiri.")
+    db.delete_photo(conn, photo_id)
+    db.log_activity(
+        conn,
+        "PHOTO_DELETED",
+        user_id=user_id,
+        detail=f"photo_id={photo_id}",
+    )
+
+
 def list_files(
     conn: sqlite3.Connection, user_id: int, role: str
 ) -> list[sqlite3.Row]:
@@ -410,6 +435,31 @@ def save_file(
         "ukuran": ukuran,
         "file_hash": file_hash,
     })
+
+
+def delete_file(
+    conn: sqlite3.Connection,
+    *,
+    user_id: int,
+    role: str,
+    file_id: int,
+) -> None:
+    """Hapus berkas jika admin atau pemilik unggah relawan."""
+    user = require_active_user(conn, user_id, role)
+    row = db.get_file_by_id(conn, file_id)
+    if row is None:
+        raise ValueError("Berkas tidak ditemukan.")
+    if role == "admin":
+        pass
+    elif int(row["uploader_id"]) != int(user["id"]):
+        raise PermissionError("Relawan hanya dapat menghapus berkas miliknya sendiri.")
+    db.delete_file(conn, file_id)
+    db.log_activity(
+        conn,
+        "FILE_DELETED",
+        user_id=user_id,
+        detail=f"file_id={file_id}",
+    )
 
 
 def get_file_for_admin(

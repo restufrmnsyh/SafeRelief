@@ -134,6 +134,8 @@ class PhotoPage(QWidget):
         self.decrypt_button = QPushButton("Decrypt")
         self.decrypt_button.clicked.connect(self.decrypt_selected)
         self.decrypt_button.setVisible(self._role == "admin")
+        self.delete_button = QPushButton("Hapus")
+        self.delete_button.clicked.connect(self.delete_selected_photo)
         self.metadata_view = QLabel("Metadata terenkripsi tampil di sini.")
         self.metadata_view.setWordWrap(True)
         self.image_view = QLabel("Preview foto akan tampil setelah decrypt.")
@@ -155,6 +157,7 @@ class PhotoPage(QWidget):
         if self._role == "admin":
             actions.addWidget(self.extract_button)
             actions.addWidget(self.decrypt_button)
+            actions.addWidget(self.delete_button)
         actions.addStretch()
         actions.addWidget(self.back_button)
 
@@ -383,6 +386,40 @@ class PhotoPage(QWidget):
         except (OSError, ValueError):
             self.image_view.clear()
             self.image_view.setText("Preview foto tidak tersedia.")
+
+    def delete_selected_photo(self) -> None:
+        """Hapus foto yang dipilih dengan konfirmasi dan bersihkan file di storage."""
+        if not self._authorized():
+            return
+        row = self.table.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Hapus foto", "Pilih foto terlebih dahulu.")
+            return
+        photo_id = int(self.table.item(row, 0).text())
+        photo = next((item for item in self._photos if item["id"] == photo_id), None)
+        if photo is None:
+            QMessageBox.warning(self, "Hapus foto", "Foto tidak ditemukan.")
+            return
+        answer = QMessageBox.question(
+            self,
+            "Konfirmasi hapus foto",
+            "Yakin ingin menghapus foto ini? file steganografi yang terkait juga akan dibersihkan.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            image_path = self._stored_image_path(str(photo["image_path"]))
+            secure_store.delete_photo(
+                self._conn,
+                user_id=self._user_id,
+                role=self._role,
+                photo_id=photo_id,
+            )
+            image_path.unlink(missing_ok=True)
+            self.status_label.setText("Foto berhasil dihapus.")
+            self.refresh()
+        except (PermissionError, ValueError, sqlite3.Error, OSError) as exc:
+            QMessageBox.critical(self, "Gagal menghapus foto", str(exc))
 
     def extract_selected(self) -> None:
         """Ambil payload terenkripsi tanpa membuka plaintext agar admin harus decrypt eksplisit."""

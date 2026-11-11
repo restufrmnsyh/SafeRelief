@@ -257,6 +257,8 @@ class VictimsPage(QWidget):
         self.edit_button.clicked.connect(self.edit_victim)
         self.detail_button = QPushButton("Detail")
         self.detail_button.clicked.connect(self.show_detail)
+        self.delete_button = QPushButton("Hapus")
+        self.delete_button.clicked.connect(self.delete_victim)
         self.back_button = QPushButton("Kembali ke Dashboard")
         self.back_button.clicked.connect(self.dashboard_requested.emit)
         self.edit_button.setEnabled(False)
@@ -268,6 +270,7 @@ class VictimsPage(QWidget):
         actions.addWidget(self.add_button)
         actions.addWidget(self.edit_button)
         actions.addWidget(self.detail_button)
+        actions.addWidget(self.delete_button)
         actions.addStretch()
         actions.addWidget(self.back_button)
         layout = QVBoxLayout(self)
@@ -532,6 +535,48 @@ class VictimsPage(QWidget):
         posko_id = detail.get("posko_id")
         lines.append(f"Posko: {self._posko_names.get(posko_id, '-')}")
         QMessageBox.information(self, "Detail Korban", "\n".join(lines))
+
+    def delete_victim(self) -> None:
+        """Hapus korban permanen dengan konfirmasi admin."""
+        if not self._authorized():
+            return
+        if self._user["role"] != "admin":
+            QMessageBox.warning(
+                self,
+                "Akses ditolak",
+                "Hanya admin yang dapat menghapus data korban.",
+            )
+            return
+
+        victim = self._selected_victim()
+        if victim is None:
+            return
+        kode = str(victim.get("kode_korban") or "-")
+        answer = QMessageBox.question(
+            self,
+            "Konfirmasi hapus korban",
+            "Yakin ingin menghapus data korban "
+            f"{kode}? Tindakan ini tidak dapat dibatalkan. "
+            "Foto dan dokumentasi terkait korban ini (jika ada) juga akan kehilangan referensinya.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            db.delete_victim(self._conn, int(victim["id"]))
+            db.log_activity(
+                self._conn,
+                "DELETE_VICTIM",
+                user_id=int(self._user["id"]),
+                detail=f"victim_id={victim['id']}; kode_korban={kode}",
+            )
+            self._decrypted_victim_id = None
+            self.status_label = getattr(self, "status_label", None)
+            if self.status_label is not None:
+                self.status_label.setText(f"Data korban '{kode}' berhasil dihapus.")
+            self.refresh()
+        except (PermissionError, ValueError, sqlite3.Error) as exc:
+            QMessageBox.critical(self, "Gagal menghapus korban", str(exc))
 
     def _decrypt_victim(self, victim_id: int) -> None:
         """Decrypt detail korban untuk admin hanya saat tombol Decrypt ditekan."""

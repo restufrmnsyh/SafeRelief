@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from auth import dongle, face_auth, session, volunteers
+from database import db
 
 
 class FaceEnrollmentWorker(QThread):
@@ -180,6 +181,8 @@ class VolunteerManagementPage(QWidget):
         self.active_button.clicked.connect(self.toggle_active)
         self.dongle_button = QPushButton("Ganti Dongle")
         self.dongle_button.clicked.connect(self.replace_dongle)
+        self.delete_button = QPushButton("Hapus")
+        self.delete_button.clicked.connect(self.delete_volunteer)
         self.back_button = QPushButton("Kembali ke Dashboard")
         self.back_button.clicked.connect(self.dashboard_requested.emit)
         self.status_label = QLabel("")
@@ -191,6 +194,7 @@ class VolunteerManagementPage(QWidget):
             self.edit_button,
             self.active_button,
             self.dongle_button,
+            self.delete_button,
         ):
             actions.addWidget(button)
         footer = QHBoxLayout()
@@ -369,6 +373,35 @@ class VolunteerManagementPage(QWidget):
             self.refresh()
         except (PermissionError, ValueError, OSError, sqlite3.Error) as exc:
             QMessageBox.critical(self, "Gagal mengganti dongle", str(exc))
+
+    def delete_volunteer(self) -> None:
+        """Hapus akun relawan permanen dengan peringatan dampak schema."""
+        user = self._selected_volunteer()
+        if user is None:
+            return
+        username = str(user.get("username") or "-")
+        answer = QMessageBox.question(
+            self,
+            "Konfirmasi hapus relawan",
+            "Yakin ingin menghapus akun relawan "
+            f"{username}? Tindakan ini permanen. "
+            "Pesan yang terkait dengan relawan ini akan ikut terhapus, "
+            "dan referensi foto/dokumen yang terkait dapat terpengaruh sesuai aturan database.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            db.delete_user(self._conn, int(user["id"]))
+            db.log_activity(
+                self._conn,
+                "DELETE_USER",
+                user_id=int(session.get_current_user()["id"]),
+                detail=f"volunteer_id={user['id']}; username={username}",
+            )
+            self.status_label.setText(f"Relawan '{username}' berhasil dihapus.")
+            self.refresh()
+        except (PermissionError, ValueError, sqlite3.Error) as exc:
+            QMessageBox.critical(self, "Gagal menghapus relawan", str(exc))
 
     def stop_face_capture(self) -> None:
         """Tunggu capture webcam selesai sebelum jendela dan worker ditutup."""

@@ -316,6 +316,17 @@ def delete_posko(conn: sqlite3.Connection, posko_id: int) -> None:
     conn.commit()
 
 
+def delete_user(conn: sqlite3.Connection, user_id: int) -> None:
+    """Hapus user secara permanen; admin dilarang dihapus."""
+    row = get_user_by_id(conn, user_id)
+    if row is None:
+        raise ValueError("User tidak ditemukan.")
+    if row["role"] == "admin":
+        raise PermissionError("Admin tidak dapat dihapus.")
+    conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.commit()
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Victims
 # ──────────────────────────────────────────────────────────────────────
@@ -365,6 +376,15 @@ def get_victim_by_id(conn: sqlite3.Connection, victim_id: int) -> Optional[sqlit
 def get_victim_by_kode(conn: sqlite3.Connection, kode: str) -> Optional[sqlite3.Row]:
     cur = conn.execute("SELECT * FROM victims WHERE kode_korban = ?", (kode,))
     return cur.fetchone()
+
+
+def delete_victim(conn: sqlite3.Connection, victim_id: int) -> None:
+    """Hapus data korban secara permanen, termasuk referensi foto terkait."""
+    row = get_victim_by_id(conn, victim_id)
+    if row is None:
+        raise ValueError("Data korban tidak ditemukan.")
+    conn.execute("DELETE FROM victims WHERE id = ?", (victim_id,))
+    conn.commit()
 
 
 def update_victim(conn: sqlite3.Connection, victim_id: int, data: dict) -> None:
@@ -448,6 +468,20 @@ def insert_photo(conn: sqlite3.Connection, data: dict) -> int:
     )
     conn.commit()
     return cur.lastrowid
+
+
+def get_photo_by_id(conn: sqlite3.Connection, photo_id: int) -> Optional[sqlite3.Row]:
+    cur = conn.execute("SELECT * FROM photos WHERE id = ?", (photo_id,))
+    return cur.fetchone()
+
+
+def delete_photo(conn: sqlite3.Connection, photo_id: int) -> None:
+    """Hapus catatan foto dan file fisiknya jika sudah ada."""
+    row = get_photo_by_id(conn, photo_id)
+    if row is None:
+        raise ValueError("Foto tidak ditemukan.")
+    conn.execute("DELETE FROM photos WHERE id = ?", (photo_id,))
+    conn.commit()
 
 
 def list_photos_by_victim(conn: sqlite3.Connection, victim_id: int) -> list[sqlite3.Row]:
@@ -577,6 +611,15 @@ def list_files(
 def get_file_by_id(conn: sqlite3.Connection, file_id: int) -> Optional[sqlite3.Row]:
     cur = conn.execute("SELECT * FROM files WHERE id = ?", (file_id,))
     return cur.fetchone()
+
+
+def delete_file(conn: sqlite3.Connection, file_id: int) -> None:
+    """Hapus metadata berkas beserta referensi file yang tersimpan."""
+    row = get_file_by_id(conn, file_id)
+    if row is None:
+        raise ValueError("Berkas tidak ditemukan.")
+    conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
+    conn.commit()
 
 
 # ──────────────────────────────────────────────────────────────────────
