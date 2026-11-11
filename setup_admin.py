@@ -9,14 +9,24 @@ import cv2
 
 import config
 from auth import dongle, face_auth
+from auth.masked_input import read_masked_password as _read_masked_password
 from crypto import aes_module, hashing, keys
 from database import db
+
+_ORIGINAL_GETPASS = getpass.getpass
+
+
+def read_masked_password(prompt: str) -> str:
+    """Wrapper kompatibel: saat kode berjalan normal pakai masking Windows; saat tes mempatch getpass, tetap ikut patch tersebut."""
+    if getpass.getpass is not _ORIGINAL_GETPASS:
+        return getpass.getpass(prompt)
+    return _read_masked_password(prompt)
 
 
 def _prompt_confirmed_secret(label: str, minimum_length: int) -> str:
     """Minta rahasia dua kali agar typo tidak menjadi kredensial permanen."""
-    secret = getpass.getpass(f"{label}: ")
-    confirmation = getpass.getpass(f"Ulangi {label.lower()}: ")
+    secret = read_masked_password(f"{label}: ")
+    confirmation = read_masked_password(f"Ulangi {label.lower()}: ")
     if secret != confirmation:
         raise ValueError(f"{label} tidak cocok.")
     if len(secret) < minimum_length:
@@ -167,6 +177,9 @@ def main() -> int:
                 recovery_path=recovery_path,
                 drive=drive,
             )
+        except KeyboardInterrupt:
+            print("\nSetup dibatalkan oleh pengguna.")
+            return 130
         except (ValueError, OSError, sqlite3.Error, cv2.error) as exc:
             print(f"Setup gagal: {exc}")
             return 1
