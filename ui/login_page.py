@@ -103,22 +103,25 @@ class LoginPage(QWidget):
         self._face_worker: FaceVerificationWorker | None = None
         self._registration_mode = False
 
-        # Full White Screen Background
-        self.setStyleSheet("background-color: #FFFFFF; color: #0F172A;")
+        # Latar berbasis soft blue agar lebih konsisten dengan desain aplikasi.
+        self.setStyleSheet(
+            "QWidget#loginPage { background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #edf5fb, stop:1 #f7fbff); color: #1E2A39; }"
+            "QLabel { color: #1E2A39; }"
+        )
 
-        # Layout Utama: Seluruh Layar Putih Terpusat
+        # Layout Utama: layar terpusat dengan ruang breathing room.
         root_layout = QVBoxLayout(self)
         root_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        root_layout.setContentsMargins(40, 40, 40, 40)
-        root_layout.setSpacing(16)
+        root_layout.setContentsMargins(48, 40, 48, 40)
+        root_layout.setSpacing(18)
 
-        # Container Card Putih Bersih
+        # Container Card dengan latar soft glass.
         self.card_frame = QFrame()
         self.card_frame.setStyleSheet(
             "QFrame#mainLoginCard {"
-            "   background-color: #FFFFFF;"
-            "   border: 1px solid #E2E8F0;"
-            "   border-radius: 20px;"
+            "   background: rgba(255,255,255,0.78);"
+            "   border: 1px solid #dfeaf5;"
+            "   border-radius: 26px;"
             "}"
         )
         self.card_frame.setObjectName("mainLoginCard")
@@ -132,7 +135,7 @@ class LoginPage(QWidget):
         title_label = QLabel("SafeRelief")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_label.setStyleSheet(
-            "font-size: 28px; font-weight: 800; color: #0F172A; border: none;"
+            "font-size: 30px; font-weight: 800; color: #1e2a39; border: none; letter-spacing: 0.5px;"
         )
 
         # Status Dongle (Di Tengah Atas Form)

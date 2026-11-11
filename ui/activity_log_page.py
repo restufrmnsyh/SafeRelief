@@ -35,6 +35,14 @@ class ActivityLogPage(QWidget):
             raise PermissionError("Log aktivitas hanya dapat dilihat admin.")
         self._user_id = int(user["id"])
 
+        self.setStyleSheet(
+            "QWidget { background: #edf5fb; color: #1E2A39; }"
+            "QLabel { color: #1E2A39; }"
+            "QTableWidget, QComboBox { background: #f9fcff; border: 1px solid #dfeaf5; border-radius: 10px; }"
+            "QPushButton { background-color: #ffffff; color: #1E2A39; border: 1px solid #dfeaf5; border-radius: 12px; padding: 8px 12px; font-weight: 700; }"
+            "QPushButton:hover { background-color: #eef7ff; border-color: #bfdcf0; }"
+        )
+
         self.user_filter = QComboBox()
         self.action_filter = QComboBox()
         self.table = QTableWidget(0, len(self._columns))

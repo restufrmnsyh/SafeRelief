@@ -27,20 +27,33 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("SafeRelief")
-        self.resize(900, 650)
+        self.resize(980, 700)
+        self.setStyleSheet(
+            "QMainWindow { background: #edf5fb; }"
+            "QStackedWidget { background: #edf5fb; }"
+            "QWidget#dongleGatePage { background: #edf5fb; }"
+        )
         self._conn = db.get_connection()
 
         self.pages = QStackedWidget(self)
+        self.pages.setStyleSheet("QStackedWidget { background: #edf5fb; }")
         self.setCentralWidget(self.pages)
 
         self.gate_page = QWidget()
         self.gate_page.setObjectName("dongleGatePage")
+        self.gate_page.setStyleSheet(
+            "QWidget#dongleGatePage { background: #edf5fb; }"
+        )
         gate_layout = QVBoxLayout(self.gate_page)
         self.gate_status = QLabel("Mencari dongle...")
         self.gate_status.setObjectName("dongleStatus")
         gate_layout.addStretch()
         gate_layout.addWidget(self.gate_status)
         gate_layout.addStretch()
+        self.gate_status.setStyleSheet(
+            "color: #1e2a39; background: rgba(255,255,255,0.65); border: 1px solid #dfeaf5; "
+            "border-radius: 14px; padding: 12px 18px; font-weight: 700;"
+        )
         self.gate_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.pages.addWidget(self.gate_page)
 

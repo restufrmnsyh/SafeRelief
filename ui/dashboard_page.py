@@ -33,6 +33,14 @@ class DashboardPage(QWidget):
             raise PermissionError("Peran sesi tidak dikenal.")
         self._conn = conn
 
+        self.setStyleSheet(
+            "QWidget { background: #edf5fb; color: #1E2A39; }"
+            "QLabel { color: #1E2A39; }"
+            "QFrame { background: #f8fbff; border: 1px solid #dfeaf5; border-radius: 18px; }"
+            "QPushButton { background-color: #ffffff; color: #1E2A39; border: 1px solid #dfeaf5; border-radius: 12px; padding: 10px 12px; font-weight: 700; }"
+            "QPushButton:hover { background-color: #eef7ff; border-color: #bfdcf0; }"
+        )
+
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(28, 28, 28, 28)
         main_layout.setSpacing(20)
@@ -40,9 +48,9 @@ class DashboardPage(QWidget):
         # Hero Banner Header
         hero_card = QFrame()
         hero_card.setStyleSheet(
-            "background-color: #FFFFFF; "
-            "border: 1px solid #E2E8F0; "
-            "border-radius: 12px; padding: 20px;"
+            "background-color: #ffffff; "
+            "border: 1px solid #dfeaf5; "
+            "border-radius: 18px; padding: 18px;"
         )
         hero_layout = QHBoxLayout(hero_card)
 
@@ -50,27 +58,27 @@ class DashboardPage(QWidget):
         self.welcome_label = QLabel(
             f"Selamat Datang, <b>{user.get('nama_lengkap') or user.get('username')}</b>"
         )
-        self.welcome_label.setStyleSheet("font-size: 20px; color: #0F172A;")
-        
+        self.welcome_label.setStyleSheet("font-size: 22px; color: #1E2A39; font-weight: 700;")
+
         sub_hero = QLabel("Sistem Operasional Tanggap Bencana & Kriptografi Data Terdekripsi.")
-        sub_hero.setStyleSheet("font-size: 12px; color: #64748B; margin-top: 2px;")
+        sub_hero.setStyleSheet("font-size: 12px; color: #5b778d; margin-top: 2px;")
 
         hero_text_layout.addWidget(self.welcome_label)
         hero_text_layout.addWidget(sub_hero)
 
-        # Role Badge Merah Soft
+        # Role Badge dengan palette biru soft
         self.role_badge = QLabel("ROLE: ADMIN" if role == "admin" else "ROLE: RELAWAN")
         self.role_badge.setStyleSheet(
-            "background-color: #FEF2F2; color: #EF4444; font-weight: 800; "
-            "font-size: 11px; padding: 6px 14px; border-radius: 20px; border: 1px solid #FCA5A5;"
+            "background-color: #EAF6FF; color: #2A5877; font-weight: 800; "
+            "font-size: 11px; padding: 6px 14px; border-radius: 16px; border: 1px solid #B9D9F0;"
         )
         self.logout_button = QPushButton("Logout")
         self.logout_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.logout_button.setStyleSheet(
             "QPushButton {"
-            "background-color: #111827; color: #F9FAFB; border: none; border-radius: 10px; "
+            "background-color: #1e2a39; color: #f3f8ff; border: none; border-radius: 10px; "
             "padding: 8px 14px; font-weight: 700; font-size: 11px; }"
-            "QPushButton:hover { background-color: #1F2937; }"
+            "QPushButton:hover { background-color: #2D405A; }"
         )
         self.logout_button.clicked.connect(self._confirm_logout)
 
@@ -83,11 +91,12 @@ class DashboardPage(QWidget):
 
         # Section Title
         lbl_sec1 = QLabel("Ringkasan Status Korban Bencana")
-        lbl_sec1.setStyleSheet("font-size: 15px; font-weight: 700; color: #0F172A;")
+        lbl_sec1.setStyleSheet("font-size: 15px; font-weight: 700; color: #1E2A39;")
         main_layout.addWidget(lbl_sec1)
 
         # Full Pastel Metric Cards Layout
         self.status_container = QWidget()
+        self.status_container.setStyleSheet("QWidget { background: transparent; border: none; }")
         self.status_layout = QHBoxLayout(self.status_container)
         self.status_layout.setContentsMargins(0, 0, 0, 0)
         self.status_layout.setSpacing(10)
@@ -96,16 +105,16 @@ class DashboardPage(QWidget):
         # Posko Details Card
         self.posko_card = QFrame()
         self.posko_card.setStyleSheet(
-            "background-color: #FFFFFF; border: 1px solid #E2E8F0; "
-            "border-radius: 12px; padding: 16px;"
+            "background-color: #ffffff; border: 1px solid #dfeaf5; "
+            "border-radius: 18px; padding: 16px;"
         )
         posko_layout = QVBoxLayout(self.posko_card)
-        
+
         lbl_posko_title = QLabel("Sebaran Korban per Posko")
-        lbl_posko_title.setStyleSheet("font-size: 13px; font-weight: 700; color: #0F172A; margin-bottom: 4px;")
-        
+        lbl_posko_title.setStyleSheet("font-size: 13px; font-weight: 700; color: #1E2A39; margin-bottom: 4px;")
+
         self.posko_summary_label = QLabel()
-        self.posko_summary_label.setStyleSheet("font-size: 13px; color: #475569; line-height: 1.5;")
+        self.posko_summary_label.setStyleSheet("font-size: 13px; color: #5b778d; line-height: 1.5;")
         self.posko_summary_label.setWordWrap(True)
 
         posko_layout.addWidget(lbl_posko_title)
@@ -115,11 +124,11 @@ class DashboardPage(QWidget):
 
         nav_card = QFrame()
         nav_card.setStyleSheet(
-            "background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 16px;"
+            "background-color: #ffffff; border: 1px solid #dfeaf5; border-radius: 18px; padding: 16px;"
         )
         nav_layout = QVBoxLayout(nav_card)
         nav_title = QLabel("Navigasi Akses Cepat")
-        nav_title.setStyleSheet("font-size: 15px; font-weight: 700; color: #0F172A;")
+        nav_title.setStyleSheet("font-size: 15px; font-weight: 700; color: #1E2A39;")
         nav_layout.addWidget(nav_title)
 
         navigation_map = {
@@ -151,18 +160,18 @@ class DashboardPage(QWidget):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setStyleSheet(
                 "QPushButton {"
-                "background-color: #FFFFFF;"
-                "color: #0F172A;"
-                "border: 1px solid #E2E8F0;"
-                "border-radius: 10px;"
+                "background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #ffffff, stop:1 #f1f8ff);"
+                "color: #1E2A39;"
+                "border: 1px solid #dfeaf5;"
+                "border-radius: 12px;"
                 "padding: 12px 14px;"
                 "text-align: left;"
-                "font-weight: 600;"
+                "font-weight: 700;"
                 "font-size: 12px;"
                 "}"
                 "QPushButton:hover {"
-                "background-color: #F8FAFC;"
-                "border: 1px solid #CBD5E1;"
+                "background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #f4fbff, stop:1 #e4f2ff);"
+                "border: 1px solid #bfdcf0;"
                 "}"
             )
             button.clicked.connect(lambda checked=False, page=page_name: self.page_requested.emit(page))
@@ -208,7 +217,7 @@ class DashboardPage(QWidget):
             card.setStyleSheet(
                 f"background-color: {bg_pastel}; "
                 f"border: 1px solid {border_color}; "
-                f"border-radius: 10px; "
+                f"border-radius: 16px; "
                 f"padding: 12px;"
             )
             c_layout = QVBoxLayout(card)

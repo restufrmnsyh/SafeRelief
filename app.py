@@ -10,66 +10,77 @@ from ui.main_window import MainWindow
 
 
 def _apply_light_theme(app: QApplication) -> None:
-    """Tetapkan skema terang yang konsisten ke seluruh widget aplikasi."""
+    """Tetapkan skema visual modern pastel sesuai referensi desain tanpa mengubah logika aplikasi."""
     app.setStyle("Fusion")
 
     palette = QPalette()
-    palette.setColor(QPalette.Window, QColor("#F8FAFC"))
-    palette.setColor(QPalette.WindowText, QColor("#0F172A"))
-    palette.setColor(QPalette.Base, QColor("#FFFFFF"))
-    palette.setColor(QPalette.AlternateBase, QColor("#F8FAFC"))
+    palette.setColor(QPalette.Window, QColor("#EAF3F7"))
+    palette.setColor(QPalette.WindowText, QColor("#1E2A39"))
+    palette.setColor(QPalette.Base, QColor("#F9FCFF"))
+    palette.setColor(QPalette.AlternateBase, QColor("#EEF8FF"))
     palette.setColor(QPalette.ToolTipBase, QColor("#FFFFFF"))
-    palette.setColor(QPalette.ToolTipText, QColor("#0F172A"))
-    palette.setColor(QPalette.Text, QColor("#0F172A"))
+    palette.setColor(QPalette.ToolTipText, QColor("#1E2A39"))
+    palette.setColor(QPalette.Text, QColor("#1E2A39"))
     palette.setColor(QPalette.Button, QColor("#FFFFFF"))
-    palette.setColor(QPalette.ButtonText, QColor("#0F172A"))
-    palette.setColor(QPalette.Light, QColor("#E2E8F0"))
-    palette.setColor(QPalette.Midlight, QColor("#F1F5F9"))
-    palette.setColor(QPalette.Dark, QColor("#94A3B8"))
-    palette.setColor(QPalette.Mid, QColor("#CBD5E1"))
-    palette.setColor(QPalette.Shadow, QColor("#0F172A"))
-    palette.setColor(QPalette.Highlight, QColor("#0F172A"))
-    palette.setColor(QPalette.HighlightedText, QColor("#F8FAFC"))
-    palette.setColor(QPalette.Link, QColor("#0F172A"))
-    palette.setColor(QPalette.LinkVisited, QColor("#0F172A"))
-    palette.setColor(QPalette.Disabled, QPalette.Text, QColor("#64748B"))
-    palette.setColor(QPalette.Disabled, QPalette.ButtonText, QColor("#64748B"))
-    palette.setColor(QPalette.Disabled, QPalette.WindowText, QColor("#64748B"))
+    palette.setColor(QPalette.ButtonText, QColor("#1E2A39"))
+    palette.setColor(QPalette.Light, QColor("#F1F9FF"))
+    palette.setColor(QPalette.Midlight, QColor("#DDECF8"))
+    palette.setColor(QPalette.Dark, QColor("#93AFC5"))
+    palette.setColor(QPalette.Mid, QColor("#C8D9E8"))
+    palette.setColor(QPalette.Shadow, QColor("#30506A"))
+    palette.setColor(QPalette.Highlight, QColor("#7FB8D6"))
+    palette.setColor(QPalette.HighlightedText, QColor("#102033"))
+    palette.setColor(QPalette.Link, QColor("#3A6C8E"))
+    palette.setColor(QPalette.LinkVisited, QColor("#3A6C8E"))
+    palette.setColor(QPalette.Disabled, QPalette.Text, QColor("#6E879C"))
+    palette.setColor(QPalette.Disabled, QPalette.ButtonText, QColor("#6E879C"))
+    palette.setColor(QPalette.Disabled, QPalette.WindowText, QColor("#6E879C"))
     app.setPalette(palette)
 
     app.setStyleSheet(
         """
         QWidget {
-            background-color: #F8FAFC;
-            color: #0F172A;
+            background-color: #EAF3F7;
+            color: #1E2A39;
             font-family: "Segoe UI", sans-serif;
         }
+        QMainWindow, QStackedWidget {
+            background: #EAF3F7;
+        }
         QLabel {
-            color: #0F172A;
+            color: #1E2A39;
         }
         QLabel[objectName="dongleStatus"] {
-            font-size: 14px;
-            color: #0F172A;
+            font-size: 15px;
+            font-weight: 700;
+            color: #1E2A39;
+            letter-spacing: 0.2px;
         }
         QFrame {
-            background-color: #FFFFFF;
-            border: 1px solid #E2E8F0;
-            border-radius: 12px;
+            background-color: #F7FBFF;
+            border: 1px solid #CFE2EC;
+            border-radius: 18px;
         }
         QPushButton {
             background-color: #FFFFFF;
-            color: #0F172A;
-            border: 1px solid #E2E8F0;
-            border-radius: 10px;
-            padding: 8px 12px;
-            font-weight: 600;
+            color: #1E2A39;
+            border: 1px solid #D7E6F2;
+            border-radius: 12px;
+            padding: 10px 14px;
+            font-weight: 700;
+            min-height: 32px;
         }
         QPushButton:hover {
-            background-color: #F8FAFC;
-            border-color: #CBD5E1;
+            background-color: #EEF7FF;
+            border-color: #BCD8EB;
         }
         QPushButton:pressed {
-            background-color: #E2E8F0;
+            background-color: #DDECF8;
+        }
+        QPushButton:default {
+            background-color: #87BDD9;
+            color: #102033;
+            border: 1px solid #75AFCB;
         }
         QLineEdit,
         QTextEdit,
@@ -80,49 +91,65 @@ def _apply_light_theme(app: QApplication) -> None:
         QDateEdit,
         QTimeEdit,
         QDateTimeEdit {
-            background-color: #FFFFFF;
-            color: #0F172A;
-            border: 1px solid #E2E8F0;
-            border-radius: 8px;
-            padding: 8px 10px;
-            selection-background-color: #0F172A;
-            selection-color: #F8FAFC;
+            background-color: #F9FCFF;
+            color: #1E2A39;
+            border: 1px solid #D4E5F1;
+            border-radius: 10px;
+            padding: 9px 12px;
+            selection-background-color: #89BBD8;
+            selection-color: #102033;
+        }
+        QComboBox::drop-down {
+            border: none;
+            background: transparent;
+        }
+        QComboBox {
+            padding-right: 26px;
         }
         QTableWidget {
-            background-color: #FFFFFF;
-            alternate-background-color: #F8FAFC;
-            color: #0F172A;
-            border: 1px solid #E2E8F0;
-            border-radius: 10px;
-            gridline-color: #E2E8F0;
+            background-color: #F9FCFF;
+            alternate-background-color: #F2F9FF;
+            color: #1E2A39;
+            border: 1px solid #D4E5F1;
+            border-radius: 14px;
+            gridline-color: #DDECF8;
         }
         QTableWidget::item {
-            padding: 8px 10px;
+            padding: 10px 12px;
             border: none;
-            color: #0F172A;
+            color: #1E2A39;
         }
         QTableWidget::item:selected {
-            background-color: #E2E8F0;
-            color: #0F172A;
+            background-color: #DDECF8;
+            color: #102033;
         }
         QHeaderView::section {
-            background-color: #F8FAFC;
-            color: #0F172A;
+            background-color: #EDF6FC;
+            color: #1E2A39;
             padding: 10px 8px;
             font-weight: 700;
-            border: 1px solid #E2E8F0;
+            border: 1px solid #D4E5F1;
         }
         QHeaderView {
             border: 0px;
         }
         QScrollBar:vertical,
         QScrollBar:horizontal {
-            background: #F8FAFC;
+            background: #EAF3F7;
             border: none;
         }
         QScrollBar::handle {
-            background: #CBD5E1;
-            border-radius: 6px;
+            background: #B8D6E7;
+            border-radius: 7px;
+        }
+        QMessageBox {
+            background-color: #F7FBFF;
+        }
+        QMessageBox QLabel {
+            color: #1E2A39;
+        }
+        QMessageBox QPushButton {
+            min-width: 90px;
         }
         """
     )

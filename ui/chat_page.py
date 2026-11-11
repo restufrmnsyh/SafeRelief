@@ -44,6 +44,16 @@ class ChatPage(QWidget):
         )
         self._messages: dict[int, sqlite3.Row] = {}
 
+        self.setStyleSheet(
+            "QWidget { background: #edf5fb; color: #1E2A39; }"
+            "QLabel { color: #1E2A39; }"
+            "QFrame, QListWidget, QPlainTextEdit, QLineEdit, QComboBox, QTableWidget { background: #f9fcff; border: 1px solid #dfeaf5; border-radius: 12px; }"
+            "QPushButton { background-color: #ffffff; color: #1E2A39; border: 1px solid #dfeaf5; border-radius: 12px; padding: 8px 12px; font-weight: 700; }"
+            "QPushButton:hover { background-color: #eef7ff; border-color: #bfdcf0; }"
+            "QListWidget::item { padding: 8px; border: none; border-radius: 8px; }"
+            "QListWidget::item:selected { background: #dfeaf5; color: #1E2A39; }"
+        )
+
         self.contact_input = QComboBox()
         for contact in self._contacts:
             label = str(contact.get("nama_lengkap") or contact["username"])

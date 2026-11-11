@@ -149,6 +149,14 @@ class VolunteerManagementPage(QWidget):
         self._conn = conn
         self._pending_volunteer: dict[str, object] | None = None
 
+        self.setStyleSheet(
+            "QWidget { background: #edf5fb; color: #1E2A39; }"
+            "QLabel { color: #1E2A39; }"
+            "QTableWidget, QLineEdit, QComboBox, QSpinBox { background: #f9fcff; border: 1px solid #dfeaf5; border-radius: 10px; }"
+            "QPushButton { background-color: #ffffff; color: #1E2A39; border: 1px solid #dfeaf5; border-radius: 12px; padding: 8px 12px; font-weight: 700; }"
+            "QPushButton:hover { background-color: #eef7ff; border-color: #bfdcf0; }"
+        )
+
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(
             ("Nama", "Username", "Posko", "Status", "ID")

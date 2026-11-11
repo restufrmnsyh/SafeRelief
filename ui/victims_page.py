@@ -231,6 +231,14 @@ class VictimsPage(QWidget):
         self._decrypted_victim_id: int | None = None
         self._is_refreshing_table = False
 
+        self.setStyleSheet(
+            "QWidget { background: #edf5fb; color: #1E2A39; }"
+            "QLabel { color: #1E2A39; }"
+            "QTableWidget, QLineEdit, QSpinBox, QComboBox, QDialog { background: #f9fcff; border: 1px solid #dfeaf5; border-radius: 10px; }"
+            "QPushButton { background-color: #ffffff; color: #1E2A39; border: 1px solid #dfeaf5; border-radius: 12px; padding: 8px 12px; font-weight: 700; }"
+            "QPushButton:hover { background-color: #eef7ff; border-color: #bfdcf0; }"
+        )
+
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Cari kode atau nama panggilan")
         self.search_input.textChanged.connect(self._apply_filters)
