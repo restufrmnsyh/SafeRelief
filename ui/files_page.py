@@ -103,6 +103,7 @@ class FilesPage(QWidget):
 
     dashboard_requested = Signal()
     _columns = ("ID", "Nama asli", "Ukuran", "Pengunggah", "Waktu")
+    _allowed_extensions = {".docx", ".pptx", ".pdf", ".xlsx"}
 
     def __init__(
         self, conn: sqlite3.Connection, parent: QWidget | None = None
@@ -151,7 +152,10 @@ class FilesPage(QWidget):
     def choose_and_upload(self) -> None:
         """Pilih file sumber; salinan terenkripsi disimpan memakai nama UUID."""
         source, _ = QFileDialog.getOpenFileName(
-            self, "Pilih berkas laporan", "", "Semua file (*)"
+            self,
+            "Pilih berkas laporan",
+            "",
+            "Dokumen (*.docx *.pptx *.pdf *.xlsx)",
         )
         if source:
             self.upload_file(Path(source))
@@ -166,6 +170,12 @@ class FilesPage(QWidget):
             QMessageBox.critical(self, "Gagal mengunggah", "File sumber tidak ditemukan.")
             return
         try:
+            suffix = source_path.suffix.lower()
+            if suffix not in self._allowed_extensions:
+                raise ValueError(
+                    "Format berkas tidak didukung. Gunakan file dengan ekstensi "
+                    ".docx, .pptx, .pdf, atau .xlsx."
+                )
             if source_path.stat().st_size > config.MAX_FILE_SIZE:
                 raise ValueError("Ukuran file melebihi batas 50 MB.")
             config.STORAGE_DIR.mkdir(parents=True, exist_ok=True)

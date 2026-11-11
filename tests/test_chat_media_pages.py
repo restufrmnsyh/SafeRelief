@@ -275,11 +275,34 @@ def test_photo_preview_unlocks_per_row_only(media_context, tmp_path: Path, qapp)
     qapp.processEvents()
 
 
+def test_file_page_rejects_unsupported_extension_before_encryption(
+    media_context, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, qapp
+):
+    conn, _admin_id, _volunteer_id, *_rest = media_context
+    unsupported = tmp_path / "laporan.EXE"
+    unsupported.write_bytes(b"bukan dokumen")
+    page = FilesPage(conn)
+    captured = {"text": ""}
+
+    def fake_critical(parent, title, text):
+        captured["text"] = text
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, "critical", fake_critical)
+    page.upload_file(unsupported)
+
+    assert "Format berkas tidak didukung" in captured["text"]
+    assert page._worker is None
+    assert not any((tmp_path / "storage").glob("*.enc"))
+    page.deleteLater()
+    qapp.processEvents()
+
+
 def test_file_page_masks_admin_row_until_decrypt_then_allows_download(
     media_context, tmp_path: Path, qapp, monkeypatch: pytest.MonkeyPatch
 ):
     conn, admin_id, volunteer_id, *_rest, storage_path = media_context
-    source_path = tmp_path / "laporan.txt"
+    source_path = tmp_path / "laporan.pdf"
     source_path.write_bytes(b"Laporan rahasia untuk admin.")
     volunteer_page = FilesPage(conn)
     volunteer_page.upload_file(source_path)
@@ -292,7 +315,7 @@ def test_file_page_masks_admin_row_until_decrypt_then_allows_download(
     admin_page = FilesPage(conn)
     monkeypatch.setattr(
         "ui.files_page.QFileDialog.getSaveFileName",
-        lambda *args, **kwargs: (str(tmp_path / "decrypted_laporan.txt"), ""),
+        lambda *args, **kwargs: (str(tmp_path / "decrypted_laporan.pdf"), ""),
     )
     assert admin_page.table.item(0, 1).text() == "[terenkripsi]"
     action_button = admin_page.table.cellWidget(0, 5)
@@ -311,7 +334,7 @@ def test_file_page_encrypts_for_volunteer_and_admin_decrypts_and_logs_tampering(
     media_context, tmp_path: Path, qapp
 ):
     conn, admin_id, volunteer_id, *_rest, storage_path = media_context
-    source_path = tmp_path / "laporan.txt"
+    source_path = tmp_path / "laporan.pdf"
     source_path.write_bytes(b"Laporan rahasia untuk admin.")
     volunteer_page = FilesPage(conn)
     volunteer_page.upload_file(source_path)
@@ -327,7 +350,7 @@ def test_file_page_encrypts_for_volunteer_and_admin_decrypts_and_logs_tampering(
         session.get_master_key(),
     )
     admin_page = FilesPage(conn)
-    destination = tmp_path / "hasil.txt"
+    destination = tmp_path / "hasil.pdf"
     admin_page.decrypt_file(int(file_row["id"]), destination)
     _finish_worker(admin_page, qapp)
     assert destination.read_bytes() == source_path.read_bytes()
@@ -335,7 +358,7 @@ def test_file_page_encrypts_for_volunteer_and_admin_decrypts_and_logs_tampering(
     encrypted = bytearray(encrypted_path.read_bytes())
     encrypted[-1] ^= 1
     encrypted_path.write_bytes(encrypted)
-    tampered_destination = tmp_path / "tampered.txt"
+    tampered_destination = tmp_path / "tampered.pdf"
     admin_page.decrypt_file(int(file_row["id"]), tampered_destination)
     _finish_worker(admin_page, qapp)
     assert not tampered_destination.exists()
