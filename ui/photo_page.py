@@ -145,6 +145,8 @@ class PhotoPage(QWidget):
         self.status_label = QLabel()
         self.back_button = QPushButton("Kembali ke Dashboard")
         self.back_button.clicked.connect(self.dashboard_requested.emit)
+        self.logout_button = QPushButton("Logout")
+        self.logout_button.clicked.connect(self._confirm_logout)
 
         form = QFormLayout()
         form.addRow("Korban", self.victim_combo)
@@ -160,6 +162,7 @@ class PhotoPage(QWidget):
             actions.addWidget(self.delete_button)
         actions.addStretch()
         actions.addWidget(self.back_button)
+        actions.addWidget(self.logout_button)
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Dokumentasi Foto Steganografi"))
@@ -174,6 +177,21 @@ class PhotoPage(QWidget):
         layout.addWidget(self.status_label)
         self.table.itemSelectionChanged.connect(self._refresh_selected_photo_preview)
         self.refresh()
+
+    def _confirm_logout(self) -> None:
+        """Minta konfirmasi sebelum logout dari halaman foto."""
+        window = self.window()
+        if window is None or not hasattr(window, "_end_session"):
+            return
+        reply = QMessageBox.question(
+            self,
+            "Logout",
+            "Yakin ingin logout?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            window._end_session("Logout manual dari halaman foto.")
 
     def choose_photo(self) -> None:
         """Pilih sumber foto; penyisipan baru dimulai setelah konfirmasi."""

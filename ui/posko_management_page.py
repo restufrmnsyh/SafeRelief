@@ -105,6 +105,8 @@ class PoskoManagementPage(QWidget):
         self.delete_button.clicked.connect(self.delete_posko)
         self.back_button = QPushButton("Kembali ke Dashboard")
         self.back_button.clicked.connect(self.dashboard_requested.emit)
+        self.logout_button = QPushButton("Logout")
+        self.logout_button.clicked.connect(self._confirm_logout)
         self.status_label = QLabel("")
         self.status_label.setWordWrap(True)
 
@@ -118,6 +120,7 @@ class PoskoManagementPage(QWidget):
         footer = QHBoxLayout()
         footer.addWidget(self.status_label, stretch=1)
         footer.addWidget(self.back_button)
+        footer.addWidget(self.logout_button)
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Manajemen Posko"))
@@ -125,6 +128,21 @@ class PoskoManagementPage(QWidget):
         layout.addLayout(actions)
         layout.addLayout(footer)
         self.refresh()
+
+    def _confirm_logout(self) -> None:
+        """Minta konfirmasi sebelum logout dari halaman posko."""
+        window = self.window()
+        if window is None or not hasattr(window, "_end_session"):
+            return
+        reply = QMessageBox.question(
+            self,
+            "Logout",
+            "Yakin ingin logout?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            window._end_session("Logout manual dari halaman posko.")
 
     def refresh(self) -> None:
         """Muattabel posko dan hitung pengguna/korban yang terikat."""

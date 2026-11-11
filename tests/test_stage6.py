@@ -204,6 +204,50 @@ def test_dashboard_manual_logout_confirms_and_returns_to_gate(
     qapp.processEvents()
 
 
+def test_feature_page_logout_starts_session_end(
+    admin_context, monkeypatch: pytest.MonkeyPatch, qapp, tmp_path: Path
+) -> None:
+    conn, admin_id, _volunteer_id = admin_context
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "stage6.db")
+    get_connection = db.get_connection
+    monkeypatch.setattr(
+        db, "get_connection", lambda: get_connection(config.DB_PATH)
+    )
+    monkeypatch.setattr(dongle, "is_any_valid_dongle_present", lambda _conn: True)
+
+    window = MainWindow()
+    session.login(
+        {"id": admin_id, "username": "admin", "role": "admin"},
+        os.urandom(config.MASTER_KEY_LENGTH),
+    )
+    window._show_dashboard(session.get_current_user())
+    window._open_page("victims")
+
+    logout_called = {"value": False}
+    real_logout = session.logout
+
+    def spy_logout() -> None:
+        logout_called["value"] = True
+        real_logout()
+
+    monkeypatch.setattr(session, "logout", spy_logout)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+
+    assert window.victims_page is not None
+    assert hasattr(window.victims_page, "logout_button")
+    window.victims_page.logout_button.click()
+
+    assert logout_called["value"] is True
+    assert not session.is_logged_in()
+    assert window.pages.currentWidget() in (window.gate_page, window.login_page)
+    window.close()
+    qapp.processEvents()
+
+
 def test_disabled_admin_cannot_continue_admin_operations(admin_context) -> None:
     conn, admin_id, _volunteer_id = admin_context
     session.login(

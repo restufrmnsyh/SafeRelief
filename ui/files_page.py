@@ -138,6 +138,8 @@ class FilesPage(QWidget):
         self.status_label = QLabel()
         self.back_button = QPushButton("Kembali ke Dashboard")
         self.back_button.clicked.connect(self.dashboard_requested.emit)
+        self.logout_button = QPushButton("Logout")
+        self.logout_button.clicked.connect(self._confirm_logout)
 
         actions = QHBoxLayout()
         if self._role == "relawan":
@@ -146,12 +148,28 @@ class FilesPage(QWidget):
             actions.addWidget(self.delete_button)
         actions.addStretch()
         actions.addWidget(self.back_button)
+        actions.addWidget(self.logout_button)
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Berkas Laporan Terenkripsi"))
         layout.addWidget(self.table, 1)
         layout.addLayout(actions)
         layout.addWidget(self.status_label)
         self.refresh()
+
+    def _confirm_logout(self) -> None:
+        """Minta konfirmasi sebelum logout dari halaman berkas."""
+        window = self.window()
+        if window is None or not hasattr(window, "_end_session"):
+            return
+        reply = QMessageBox.question(
+            self,
+            "Logout",
+            "Yakin ingin logout?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            window._end_session("Logout manual dari halaman berkas.")
 
     def choose_and_upload(self) -> None:
         """Pilih file sumber; salinan terenkripsi disimpan memakai nama UUID."""

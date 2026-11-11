@@ -69,6 +69,8 @@ class AidPage(QWidget):
         self.status_label.setWordWrap(True)
         self.back_button = QPushButton("Kembali ke Dashboard")
         self.back_button.clicked.connect(self.dashboard_requested.emit)
+        self.logout_button = QPushButton("Logout")
+        self.logout_button.clicked.connect(self._confirm_logout)
 
         self.form = QWidget()
         form_layout = QFormLayout(self.form)
@@ -86,6 +88,7 @@ class AidPage(QWidget):
         actions.addWidget(self.tamper_button)
         actions.addStretch()
         actions.addWidget(self.back_button)
+        actions.addWidget(self.logout_button)
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Distribusi Bantuan — Blockchain"))
@@ -96,6 +99,21 @@ class AidPage(QWidget):
         layout.addLayout(actions)
         layout.addWidget(self.status_label)
         self.refresh()
+
+    def _confirm_logout(self) -> None:
+        """Minta konfirmasi sebelum logout dari halaman bantuan."""
+        window = self.window()
+        if window is None or not hasattr(window, "_end_session"):
+            return
+        reply = QMessageBox.question(
+            self,
+            "Logout",
+            "Yakin ingin logout?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            window._end_session("Logout manual dari halaman distribusi bantuan.")
 
     def refresh(self) -> None:
         """Tampilkan chain tersimpan; muat ulang dari DB setelah setiap aksi."""

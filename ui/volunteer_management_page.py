@@ -2,8 +2,7 @@
 
 import sqlite3
 
-import cv2
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -20,20 +19,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from auth import dongle, face_auth, session, volunteers
+from auth import dongle, session, volunteers
 from database import db
-
-
-class FaceEnrollmentWorker(QThread):
-    """Capture embedding relawan tanpa memblokir event loop halaman admin."""
-
-    completed = Signal(object, str)
-
-    def run(self) -> None:
-        try:
-            self.completed.emit(face_auth.capture_encodings(), "")
-        except (ValueError, FileNotFoundError, OSError, cv2.error) as exc:
-            self.completed.emit(None, str(exc))
+from ui.face_enrollment_dialog import FaceEnrollmentDialog
 
 
 class VolunteerFormDialog(QDialog):
@@ -159,7 +147,6 @@ class VolunteerManagementPage(QWidget):
         if session.get_current_user().get("role") != "admin":
             raise PermissionError("Halaman ini hanya untuk admin.")
         self._conn = conn
-        self._worker: FaceEnrollmentWorker | None = None
         self._pending_volunteer: dict[str, object] | None = None
 
         self.table = QTableWidget(0, 5)
@@ -185,6 +172,8 @@ class VolunteerManagementPage(QWidget):
         self.delete_button.clicked.connect(self.delete_volunteer)
         self.back_button = QPushButton("Kembali ke Dashboard")
         self.back_button.clicked.connect(self.dashboard_requested.emit)
+        self.logout_button = QPushButton("Logout")
+        self.logout_button.clicked.connect(self._confirm_logout)
         self.status_label = QLabel("")
         self.status_label.setWordWrap(True)
 
@@ -200,12 +189,28 @@ class VolunteerManagementPage(QWidget):
         footer = QHBoxLayout()
         footer.addWidget(self.status_label, stretch=1)
         footer.addWidget(self.back_button)
+        footer.addWidget(self.logout_button)
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Manajemen Relawan"))
         layout.addWidget(self.table, stretch=1)
         layout.addLayout(actions)
         layout.addLayout(footer)
         self.refresh()
+
+    def _confirm_logout(self) -> None:
+        """Minta konfirmasi sebelum logout dari halaman relawan."""
+        window = self.window()
+        if window is None or not hasattr(window, "_end_session"):
+            return
+        reply = QMessageBox.question(
+            self,
+            "Logout",
+            "Yakin ingin logout?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            window._end_session("Logout manual dari halaman relawan.")
 
     def refresh(self) -> None:
         """Tampilkan profil relawan tanpa mengekspos kredensial atau key."""
@@ -258,40 +263,35 @@ class VolunteerManagementPage(QWidget):
             drives = dongle.find_removable_drives()
             if not drives:
                 raise ValueError("Tidak ada removable USB yang terdeteksi.")
-            dialog = VolunteerFormDialog(
+            form = VolunteerFormDialog(
                 volunteers.list_posko(self._conn), drives=drives, parent=self
             )
-            if dialog.exec() != QDialog.DialogCode.Accepted:
+            if form.exec() != QDialog.DialogCode.Accepted:
                 return
-            data = dialog.values()
+            data = form.values()
             self._pending_volunteer = data
             self.add_button.setEnabled(False)
             self.status_label.setText(
                 "Pendaftaran wajah: posisikan relawan di depan kamera..."
             )
-            worker = FaceEnrollmentWorker(self)
-            worker.completed.connect(self._face_capture_finished)
-            self._worker = worker
-            worker.start()
-        except (PermissionError, ValueError, OSError, sqlite3.Error) as exc:
-            QMessageBox.critical(self, "Gagal memulai pendaftaran", str(exc))
-
-    def _face_capture_finished(self, encoding: object, error: str) -> None:
-        data = self._pending_volunteer
-        self._pending_volunteer = None
-        self._worker = None
-        self.add_button.setEnabled(True)
-        if error:
-            self.status_label.setText("")
-            QMessageBox.critical(self, "Pendaftaran wajah gagal", error)
-            return
-        if data is None or encoding is None:
-            self.status_label.setText("")
-            QMessageBox.critical(
-                self, "Pendaftaran gagal", "Data pendaftaran tidak tersedia."
+            enrollment = FaceEnrollmentDialog(
+                str(data["nama_lengkap"]), parent=self
             )
-            return
-        try:
+            if enrollment.exec() != QDialog.DialogCode.Accepted:
+                self._pending_volunteer = None
+                self.add_button.setEnabled(True)
+                self.status_label.setText("Pendaftaran relawan dibatalkan.")
+                return
+            encoding = enrollment.capture_result
+            self._pending_volunteer = None
+            self.add_button.setEnabled(True)
+            if encoding is None:
+                self.status_label.setText("")
+                QMessageBox.critical(
+                    self, "Pendaftaran gagal", "Wajah belum direkam."
+                )
+                return
+
             volunteers.create_volunteer(
                 self._conn,
                 nama_lengkap=str(data["nama_lengkap"]),
@@ -304,6 +304,8 @@ class VolunteerManagementPage(QWidget):
             self.status_label.setText("Relawan berhasil didaftarkan.")
             self.refresh()
         except (PermissionError, ValueError, OSError, sqlite3.Error) as exc:
+            self._pending_volunteer = None
+            self.add_button.setEnabled(True)
             self.status_label.setText("")
             QMessageBox.critical(self, "Gagal membuat relawan", str(exc))
 
@@ -403,11 +405,5 @@ class VolunteerManagementPage(QWidget):
         except (PermissionError, ValueError, sqlite3.Error) as exc:
             QMessageBox.critical(self, "Gagal menghapus relawan", str(exc))
 
-    def stop_face_capture(self) -> None:
-        """Tunggu capture webcam selesai sebelum jendela dan worker ditutup."""
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.wait()
-
     def closeEvent(self, event) -> None:
-        self.stop_face_capture()
         super().closeEvent(event)

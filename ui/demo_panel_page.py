@@ -62,13 +62,31 @@ class DemoPanelPage(QWidget):
         columns.addLayout(plain_column)
         self.back_button = QPushButton("Kembali ke Dashboard")
         self.back_button.clicked.connect(self.dashboard_requested.emit)
+        self.logout_button = QPushButton("Logout")
+        self.logout_button.clicked.connect(self._confirm_logout)
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Panel Demo — Ciphertext vs Plaintext"))
         layout.addWidget(self.record_type)
         layout.addWidget(self.record_input)
         layout.addLayout(columns, 1)
         layout.addWidget(self.back_button)
+        layout.addWidget(self.logout_button)
         self.refresh_records()
+
+    def _confirm_logout(self) -> None:
+        """Minta konfirmasi sebelum logout dari panel demo."""
+        window = self.window()
+        if window is None or not hasattr(window, "_end_session"):
+            return
+        reply = QMessageBox.question(
+            self,
+            "Logout",
+            "Yakin ingin logout?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            window._end_session("Logout manual dari panel demo.")
 
     def refresh_records(self, *_signal_args: object) -> None:
         """Muat daftar metadata yang diizinkan; data terenkripsi dibaca saat pilih."""

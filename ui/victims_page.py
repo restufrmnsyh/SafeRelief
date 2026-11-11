@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 import config
 from auth import session
-from database import secure_store
+from database import db, secure_store
 
 
 STATUSES = ("selamat", "luka ringan", "luka berat", "meninggal", "tidak diketahui")
@@ -261,6 +261,8 @@ class VictimsPage(QWidget):
         self.delete_button.clicked.connect(self.delete_victim)
         self.back_button = QPushButton("Kembali ke Dashboard")
         self.back_button.clicked.connect(self.dashboard_requested.emit)
+        self.logout_button = QPushButton("Logout")
+        self.logout_button.clicked.connect(self._confirm_logout)
         self.edit_button.setEnabled(False)
 
         controls = QHBoxLayout()
@@ -273,12 +275,28 @@ class VictimsPage(QWidget):
         actions.addWidget(self.delete_button)
         actions.addStretch()
         actions.addWidget(self.back_button)
+        actions.addWidget(self.logout_button)
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Data Korban"))
         layout.addLayout(controls)
         layout.addWidget(self.table, stretch=1)
         layout.addLayout(actions)
         self.refresh()
+
+    def _confirm_logout(self) -> None:
+        """Minta konfirmasi sebelum logout dari halaman korban."""
+        window = self.window()
+        if window is None or not hasattr(window, "_end_session"):
+            return
+        reply = QMessageBox.question(
+            self,
+            "Logout",
+            "Yakin ingin logout?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            window._end_session("Logout manual dari halaman korban.")
 
     def refresh(self) -> None:
         """Muat daftar aman plaintext dan label posko."""

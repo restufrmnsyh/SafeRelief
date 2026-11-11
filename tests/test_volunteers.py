@@ -5,11 +5,52 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QObject, Signal
+from PySide6.QtGui import QImage
+from PySide6.QtWidgets import QApplication, QDialog
+
+
+class FakeCameraWorker(QObject):
+    """Worker kamera palsu untuk tes UI tanpa membuka perangkat keras."""
+
+    frame_ready = Signal(QImage)
+    camera_error = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._running = True
+
+    def start(self) -> None:
+        self._running = True
+        image = QImage(
+            np.zeros((80, 100, 3), dtype=np.uint8).tobytes(),
+            100,
+            80,
+            100 * 3,
+            QImage.Format.Format_RGB888,
+        )
+        self.frame_ready.emit(image)
+
+    def isRunning(self) -> bool:
+        return self._running
+
+    def requestInterruption(self) -> None:
+        self._running = False
+
+    def wait(self, timeout: int = 0) -> bool:
+        return True
 
 import config
-from auth import dongle, session, volunteers
+from auth import dongle, face_auth, session, volunteers
 from crypto import keys
 from database import db, secure_store
+from ui.face_enrollment_dialog import FaceEnrollmentDialog
+
+
+@pytest.fixture(scope="session")
+def qapp() -> QApplication:
+    """Gunakan satu QApplication untuk tes widget."""
+    return QApplication.instance() or QApplication([])
 
 
 @pytest.fixture
@@ -160,3 +201,69 @@ def test_failed_dongle_provision_rolls_back_volunteer(
 
     assert db.get_user_by_username(conn, "gagal") is None
     assert not (usb / config.DONGLE_KEY_FILE).exists()
+
+
+def test_face_enrollment_dialog_shows_live_feed_and_captures_encoding(
+    admin_context, monkeypatch: pytest.MonkeyPatch, qapp: QApplication
+) -> None:
+    conn, _ = admin_context
+
+    def fake_detect(frame):
+        return np.ones(128, dtype=np.float32)
+
+    monkeypatch.setattr(face_auth, "_detect_and_embed", fake_detect)
+    monkeypatch.setattr(
+        "ui.face_enrollment_dialog.CameraWorker",
+        FakeCameraWorker,
+    )
+    monkeypatch.setattr(dongle, "get_volume_serial", lambda drive: "SERIAL-FAKE")
+    monkeypatch.setattr(
+        dongle,
+        "_token_path",
+        lambda drive: Path(drive) / config.DONGLE_KEY_FILE,
+    )
+    monkeypatch.setattr(
+        dongle,
+        "provision_dongle",
+        lambda conn, drive, user_id, commit=False: b"a" * 32,
+    )
+
+    dialog = FaceEnrollmentDialog("Relawan Uji")
+    assert dialog.camera_label.pixmap() is not None
+
+    dialog.capture_face()
+    assert dialog.capture_result is not None
+    assert dialog.capture_result.shape == (128,)
+    assert dialog.status_label.text() == "Wajah berhasil direkam!"
+
+    user_id = volunteers.create_volunteer(
+        conn,
+        nama_lengkap="Relawan Uji",
+        username="relawan-uji",
+        password="password-awal",
+        posko_id=None,
+        drive="Z:",
+        encoding=dialog.capture_result,
+    )
+    stored = secure_store.load_face_encoding(
+        conn,
+        keys.derive_key(session.get_master_key(), config.HKDF_LABEL_DB),
+        user_id,
+    )
+    assert stored is not None
+    dialog.stop_camera()
+
+
+def test_face_enrollment_dialog_cancel_keeps_database_empty(
+    admin_context, monkeypatch: pytest.MonkeyPatch, qapp: QApplication
+) -> None:
+    conn, _ = admin_context
+    monkeypatch.setattr(
+        "ui.face_enrollment_dialog.CameraWorker",
+        FakeCameraWorker,
+    )
+    dialog = FaceEnrollmentDialog("Relawan Batal")
+    dialog.reject()
+    assert dialog.result() == QDialog.DialogCode.Rejected
+    assert db.get_user_by_username(conn, "relawan-batal") is None
+    dialog.stop_camera()

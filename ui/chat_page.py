@@ -76,6 +76,8 @@ class ChatPage(QWidget):
         self.status_label = QLabel()
         self.back_button = QPushButton("Kembali ke Dashboard")
         self.back_button.clicked.connect(self.dashboard_requested.emit)
+        self.logout_button = QPushButton("Logout")
+        self.logout_button.clicked.connect(self._confirm_logout)
 
         content = QHBoxLayout()
         content.addWidget(self.inbox, 1)
@@ -94,6 +96,7 @@ class ChatPage(QWidget):
         footer = QHBoxLayout()
         footer.addWidget(self.status_label, 1)
         footer.addWidget(self.back_button)
+        footer.addWidget(self.logout_button)
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Chat Koordinasi Terenkripsi"))
@@ -104,6 +107,21 @@ class ChatPage(QWidget):
         layout.addLayout(footer)
         self.contact_input.currentIndexChanged.connect(self.refresh)
         self.refresh()
+
+    def _confirm_logout(self) -> None:
+        """Minta konfirmasi sebelum logout dari halaman chat."""
+        window = self.window()
+        if window is None or not hasattr(window, "_end_session"):
+            return
+        reply = QMessageBox.question(
+            self,
+            "Logout",
+            "Yakin ingin logout?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            window._end_session("Logout manual dari halaman chat.")
 
     def refresh(self, *_signal_args: object) -> None:
         """Tampilkan pesan base64 saja dan tandai pesan masuk telah dibaca."""

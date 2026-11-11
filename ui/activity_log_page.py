@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -44,6 +45,8 @@ class ActivityLogPage(QWidget):
         self.status_label = QLabel()
         self.back_button = QPushButton("Kembali ke Dashboard")
         self.back_button.clicked.connect(self.dashboard_requested.emit)
+        self.logout_button = QPushButton("Logout")
+        self.logout_button.clicked.connect(self._confirm_logout)
         filters = QHBoxLayout()
         filters.addWidget(QLabel("User:"))
         filters.addWidget(self.user_filter)
@@ -51,6 +54,7 @@ class ActivityLogPage(QWidget):
         filters.addWidget(self.action_filter)
         filters.addStretch()
         filters.addWidget(self.back_button)
+        filters.addWidget(self.logout_button)
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Log Aktivitas"))
         layout.addLayout(filters)
@@ -60,6 +64,21 @@ class ActivityLogPage(QWidget):
         self.user_filter.currentIndexChanged.connect(self.refresh)
         self.action_filter.currentIndexChanged.connect(self.refresh)
         self.refresh()
+
+    def _confirm_logout(self) -> None:
+        """Minta konfirmasi sebelum menghentikan sesi dari halaman fitur."""
+        window = self.window()
+        if window is None or not hasattr(window, "_end_session"):
+            return
+        reply = QMessageBox.question(
+            self,
+            "Logout",
+            "Yakin ingin logout?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            window._end_session("Logout manual dari halaman log aktivitas.")
 
     def _refresh_filter_options(self) -> None:
         """Perbarui opsi user/aksi saat log baru atau relawan ditambahkan."""
