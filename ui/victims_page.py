@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 import config
 from auth import session
 from database import db, secure_store
+from ui.workspace import style_dialog
 
 
 STATUSES = ("selamat", "luka ringan", "luka berat", "meninggal", "tidak diketahui")
@@ -86,6 +87,7 @@ class VictimFormDialog(QDialog):
         form.addRow(buttons)
         if victim:
             self._populate(victim)
+        style_dialog(self)
 
     def _populate(self, victim: dict) -> None:
         self.code_input.setText(str(victim.get("kode_korban") or ""))
@@ -188,6 +190,7 @@ class VictimDetailDialog(QDialog):
         buttons.addWidget(close_button)
         layout.addLayout(buttons)
         self._table = table
+        style_dialog(self)
 
     def show_plaintext(self, detail: dict) -> None:
         """Isi kolom plaintext dengan hasil dekripsi yang baru saja diminta."""

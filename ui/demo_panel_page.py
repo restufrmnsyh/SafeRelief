@@ -210,7 +210,11 @@ class DemoPanelPage(QWidget):
         """Remove decrypted demo content from widgets before discarding page."""
         self.raw_view.clear()
         self.plaintext_view.clear()
-        self.record_input.clear()
+        blocked = self.record_input.blockSignals(True)
+        try:
+            self.record_input.clear()
+        finally:
+            self.record_input.blockSignals(blocked)
 
     def _authorized(self) -> bool:
         """Panel ciphertext/plaintext hanya boleh dipakai admin aktif."""

@@ -277,7 +277,12 @@ class ChatPage(QWidget):
     def clear_sensitive_state(self) -> None:
         """Clear plaintext and cached conversation records when session ends."""
         self._messages.clear()
-        self.inbox.clear()
+        blocked = self.inbox.blockSignals(True)
+        try:
+            self.inbox.clear()
+        finally:
+            self.inbox.blockSignals(blocked)
         self.ciphertext_view.clear()
         self.plaintext_view.clear()
         self.message_input.clear()
+        self.manual_key_input.clear()

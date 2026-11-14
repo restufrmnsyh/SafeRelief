@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLa
 
 from ui.login_page import CameraWorker
 from ui.face_capture_worker import FaceCaptureWorker
+from ui.workspace import style_dialog
 
 
 class FaceEnrollmentDialog(QDialog):
@@ -67,6 +68,7 @@ class FaceEnrollmentDialog(QDialog):
         layout.addLayout(action_row)
 
         self._start_camera()
+        style_dialog(self)
 
     @property
     def capture_result(self) -> np.ndarray | None:

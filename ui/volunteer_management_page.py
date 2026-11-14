@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from auth import dongle, session, volunteers
 from database import db
 from ui.face_enrollment_dialog import FaceEnrollmentDialog
+from ui.workspace import style_dialog
 
 
 class VolunteerFormDialog(QDialog):
@@ -79,6 +80,7 @@ class VolunteerFormDialog(QDialog):
             self.posko_input.setCurrentIndex(
                 max(0, self.posko_input.findData(volunteer.get("posko_id")))
             )
+        style_dialog(self)
 
     def values(self) -> dict[str, object]:
         name = self.name_input.text().strip()
@@ -125,6 +127,8 @@ class DongleChangeDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
+
+        style_dialog(self)
 
     def values(self) -> tuple[str, str]:
         password = self.password_input.text()

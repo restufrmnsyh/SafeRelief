@@ -54,3 +54,6 @@ desktop.ini
 
 # Local agent skills
 /.codex/
+
+# Local design previews and review reports
+/docs/

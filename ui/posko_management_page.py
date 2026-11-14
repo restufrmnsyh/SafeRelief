@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from auth import session
 from database import secure_store
+from ui.workspace import style_dialog
 
 
 class PoskoFormDialog(QDialog):
@@ -55,6 +56,7 @@ class PoskoFormDialog(QDialog):
             self.name_input.setText(str(posko.get("nama") or ""))
             self.location_input.setText(str(posko.get("lokasi") or ""))
             self.capacity_input.setValue(int(posko.get("kapasitas") or 0))
+        style_dialog(self)
 
     def values(self) -> dict[str, object]:
         name = self.name_input.text().strip()

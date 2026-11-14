@@ -19,6 +19,7 @@ from ui.photo_page import PhotoPage
 from ui.posko_management_page import PoskoManagementPage
 from ui.victims_page import VictimsPage
 from ui.volunteer_management_page import VolunteerManagementPage
+from ui.workspace import install_workspace
 
 
 class MainWindow(QMainWindow):
@@ -171,6 +172,9 @@ class MainWindow(QMainWindow):
                 clear_state = getattr(page, "clear_sensitive_state", None)
                 if callable(clear_state):
                     clear_state()
+                workspace = getattr(page, "workspace", None)
+                if workspace is not None:
+                    workspace.clear_sensitive_state()
                 self.pages.removeWidget(page)
                 page.deleteLater()
                 setattr(self, name, None)
@@ -305,6 +309,11 @@ class MainWindow(QMainWindow):
                 self.pages.addWidget(self.demo_panel_page)
             self.demo_panel_page.refresh_records()
             self.pages.setCurrentWidget(self.demo_panel_page)
+
+        page = self.pages.currentWidget()
+        if page is not self.dashboard_page and not hasattr(page, "workspace"):
+            workspace = install_workspace(page, page_name)
+            workspace.page_requested.connect(self._open_page)
 
     def closeEvent(self, event) -> None:
         """Bersihkan timer, session, halaman sensitif, dan koneksi DB saat jendela ditutup."""

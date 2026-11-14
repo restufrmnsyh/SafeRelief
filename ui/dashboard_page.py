@@ -1,264 +1,475 @@
-"""Dashboard SafeRelief dengan Role Badge Soft Red dan Full Pastel Metric Cards."""
+"""Dashboard operasional SafeRelief dengan navigasi sesuai peran sesi."""
 
 import sqlite3
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QDate, QLocale, QTimer, Qt, Signal
+from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
-    QFrame,
-    QGridLayout,
-    QHBoxLayout,
-    QLabel,
-    QMessageBox,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
+    QAbstractItemView, QFrame, QGridLayout, QHBoxLayout, QHeaderView,
+    QLabel, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
+    QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget,
 )
 
 from auth import session
 from database import secure_store
+from ui.dashboard_style import DASHBOARD_STYLE, MENU_STYLE
+
+
+NAVIGATION = (
+    ("Data lapangan", (
+        ("victims", "Data Korban"), ("aid", "Distribusi Bantuan"),
+    )),
+    ("Koordinasi", (
+        ("chat", "Chat Koordinasi"), ("photos", "Dokumentasi Foto"),
+        ("files", "Berkas Laporan"),
+    )),
+    ("Administrasi", (
+        ("volunteers", "Manajemen Relawan"), ("posko", "Manajemen Posko"),
+        ("activity", "Log Aktivitas"), ("demo", "Panel Demo"),
+    )),
+)
+
+STATUSES = (
+    ("selamat", "Selamat"), ("luka ringan", "Luka ringan"),
+    ("luka berat", "Luka berat"), ("meninggal", "Meninggal"),
+    ("tidak diketahui", "Belum diketahui"),
+)
+
+
+def _label(text: str, name: str = "", wrap: bool = False) -> QLabel:
+    """Nilai DB memakai teks biasa agar nama pengguna tidak menjadi markup."""
+    label = QLabel(text)
+    label.setObjectName(name)
+    label.setTextFormat(Qt.TextFormat.PlainText)
+    label.setWordWrap(wrap)
+    label.setMinimumWidth(0)
+    label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+    return label
+
+
+def _button(text: str) -> QPushButton:
+    """Samakan target klik dan akses keyboard untuk tindakan dashboard."""
+    button = QPushButton(text)
+    button.setMinimumHeight(44)
+    button.setCursor(Qt.CursorShape.PointingHandCursor)
+    button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    return button
 
 
 class DashboardPage(QWidget):
-    """Dashboard modern bertema Soft Pastel & Role Red Badge."""
+    """Ringkasan korban dan pintu masuk fitur tanpa mengubah autentikasi."""
 
     page_requested = Signal(str)
 
-    def __init__(
-        self, conn: sqlite3.Connection, parent: QWidget | None = None
-    ) -> None:
+    def __init__(self, conn: sqlite3.Connection, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         user = session.get_current_user()
-        role = user.get("role")
-        if role not in ("admin", "relawan"):
+        self._role = str(user.get("role"))
+        if self._role not in ("admin", "relawan"):
             raise PermissionError("Peran sesi tidak dikenal.")
+        self._user_id = int(user["id"])
         self._conn = conn
+        self._layout_mode = ""
+        self._summary: dict | None = None
+        self.setObjectName("dashboardPage")
+        self.setStyleSheet(DASHBOARD_STYLE)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self._build_navigation(outer)
 
-        self.setStyleSheet(
-            "QWidget { background: #edf5fb; color: #1E2A39; }"
-            "QLabel { color: #1E2A39; }"
-            "QFrame { background: #f8fbff; border: 1px solid #dfeaf5; border-radius: 18px; }"
-            "QPushButton { background-color: #ffffff; color: #1E2A39; border: 1px solid #dfeaf5; border-radius: 12px; padding: 10px 12px; font-weight: 700; }"
-            "QPushButton:hover { background-color: #eef7ff; border-color: #bfdcf0; }"
-        )
-
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(28, 28, 28, 28)
-        main_layout.setSpacing(20)
-
-        # Hero Banner Header
-        hero_card = QFrame()
-        hero_card.setStyleSheet(
-            "background-color: #ffffff; "
-            "border: 1px solid #dfeaf5; "
-            "border-radius: 18px; padding: 18px;"
-        )
-        hero_layout = QHBoxLayout(hero_card)
-
-        hero_text_layout = QVBoxLayout()
-        self.welcome_label = QLabel(
-            f"Selamat Datang, <b>{user.get('nama_lengkap') or user.get('username')}</b>"
-        )
-        self.welcome_label.setStyleSheet("font-size: 22px; color: #1E2A39; font-weight: 700;")
-
-        sub_hero = QLabel("Sistem Operasional Tanggap Bencana & Kriptografi Data Terdekripsi.")
-        sub_hero.setStyleSheet("font-size: 12px; color: #5b778d; margin-top: 2px;")
-
-        hero_text_layout.addWidget(self.welcome_label)
-        hero_text_layout.addWidget(sub_hero)
-
-        # Role Badge dengan palette biru soft
-        self.role_badge = QLabel("ROLE: ADMIN" if role == "admin" else "ROLE: RELAWAN")
-        self.role_badge.setStyleSheet(
-            "background-color: #EAF6FF; color: #2A5877; font-weight: 800; "
-            "font-size: 11px; padding: 6px 14px; border-radius: 16px; border: 1px solid #B9D9F0;"
-        )
-        self.logout_button = QPushButton("Logout")
-        self.logout_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.logout_button.setStyleSheet(
-            "QPushButton {"
-            "background-color: #1e2a39; color: #f3f8ff; border: none; border-radius: 10px; "
-            "padding: 8px 14px; font-weight: 700; font-size: 11px; }"
-            "QPushButton:hover { background-color: #2D405A; }"
-        )
-        self.logout_button.clicked.connect(self._confirm_logout)
-
-        hero_layout.addLayout(hero_text_layout)
-        hero_layout.addStretch()
-        hero_layout.addWidget(self.role_badge, alignment=Qt.AlignmentFlag.AlignCenter)
-        hero_layout.addWidget(self.logout_button, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        main_layout.addWidget(hero_card)
-
-        # Section Title
-        lbl_sec1 = QLabel("Ringkasan Status Korban Bencana")
-        lbl_sec1.setStyleSheet("font-size: 15px; font-weight: 700; color: #1E2A39;")
-        main_layout.addWidget(lbl_sec1)
-
-        # Full Pastel Metric Cards Layout
-        self.status_container = QWidget()
-        self.status_container.setStyleSheet("QWidget { background: transparent; border: none; }")
-        self.status_layout = QHBoxLayout(self.status_container)
-        self.status_layout.setContentsMargins(0, 0, 0, 0)
-        self.status_layout.setSpacing(10)
-        main_layout.addWidget(self.status_container)
-
-        # Posko Details Card
-        self.posko_card = QFrame()
-        self.posko_card.setStyleSheet(
-            "background-color: #ffffff; border: 1px solid #dfeaf5; "
-            "border-radius: 18px; padding: 16px;"
-        )
-        posko_layout = QVBoxLayout(self.posko_card)
-
-        lbl_posko_title = QLabel("Sebaran Korban per Posko")
-        lbl_posko_title.setStyleSheet("font-size: 13px; font-weight: 700; color: #1E2A39; margin-bottom: 4px;")
-
-        self.posko_summary_label = QLabel()
-        self.posko_summary_label.setStyleSheet("font-size: 13px; color: #5b778d; line-height: 1.5;")
-        self.posko_summary_label.setWordWrap(True)
-
-        posko_layout.addWidget(lbl_posko_title)
-        posko_layout.addWidget(self.posko_summary_label)
-
-        main_layout.addWidget(self.posko_card)
-
-        nav_card = QFrame()
-        nav_card.setStyleSheet(
-            "background-color: #ffffff; border: 1px solid #dfeaf5; border-radius: 18px; padding: 16px;"
-        )
-        nav_layout = QVBoxLayout(nav_card)
-        nav_title = QLabel("Navigasi Akses Cepat")
-        nav_title.setStyleSheet("font-size: 15px; font-weight: 700; color: #1E2A39;")
-        nav_layout.addWidget(nav_title)
-
-        navigation_map = {
-            "admin": [
-                ("victims", "Data Korban"),
-                ("volunteers", "Manajemen Relawan"),
-                ("posko", "Manajemen Posko"),
-                ("chat", "Chat Koordinasi"),
-                ("photos", "Dokumentasi Foto"),
-                ("files", "Berkas Laporan"),
-                ("aid", "Distribusi Bantuan"),
-                ("activity", "Log Aktivitas"),
-                ("demo", "Panel Demo"),
-            ],
-            "relawan": [
-                ("victims", "Data Korban"),
-                ("chat", "Chat Koordinasi"),
-                ("photos", "Dokumentasi Foto"),
-                ("files", "Berkas Laporan"),
-                ("aid", "Distribusi Bantuan"),
-            ],
-        }
-
-        button_grid = QGridLayout()
-        button_grid.setHorizontalSpacing(12)
-        button_grid.setVerticalSpacing(12)
-        for index, (page_name, label) in enumerate(navigation_map.get(role, [])):
-            button = QPushButton(label)
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setStyleSheet(
-                "QPushButton {"
-                "background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #ffffff, stop:1 #f1f8ff);"
-                "color: #1E2A39;"
-                "border: 1px solid #dfeaf5;"
-                "border-radius: 12px;"
-                "padding: 12px 14px;"
-                "text-align: left;"
-                "font-weight: 700;"
-                "font-size: 12px;"
-                "}"
-                "QPushButton:hover {"
-                "background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #f4fbff, stop:1 #e4f2ff);"
-                "border: 1px solid #bfdcf0;"
-                "}"
-            )
-            button.clicked.connect(lambda checked=False, page=page_name: self.page_requested.emit(page))
-            row, col = divmod(index, 2)
-            button_grid.addWidget(button, row, col)
-
-        nav_layout.addLayout(button_grid)
-        main_layout.addWidget(nav_card)
-        main_layout.addStretch()
-
+        self.work_scroll = QScrollArea()
+        self.work_scroll.setWidgetResizable(True)
+        self.work_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.work = QWidget()
+        self.work_layout = QVBoxLayout(self.work)
+        self.work_layout.setSpacing(24)
+        self.work_scroll.setWidget(self.work)
+        outer.addWidget(self.work_scroll, 1)
+        self._build_header()
+        self.data_message = _label("Memuat ringkasan korban...", "muted", True)
+        self.data_message.setAccessibleName("Status pemuatan dashboard")
+        self.work_layout.addWidget(self.data_message)
+        self.body = QGridLayout()
+        self.body.setSpacing(24)
+        self.work_layout.addLayout(self.body)
+        self._build_main_content()
+        self._build_context()
+        self.body.addWidget(self.main_content, 0, 0)
+        self.body.addWidget(self.context_panel, 0, 1)
+        self.body.setColumnStretch(0, 1)
+        self.work_layout.addStretch()
+        self._adapt_layout()
         self.refresh_summary()
 
-    def refresh_summary(self) -> None:
-        user = session.get_current_user()
-        try:
-            secure_store.require_active_user(
-                self._conn, int(user["id"]), str(user["role"])
+    def _build_navigation(self, outer: QHBoxLayout) -> None:
+        """Pertahankan tujuan navigasi dan pembatasan peran yang sudah ada."""
+        self.sidebar = QFrame()
+        self.sidebar.setObjectName("sidebar")
+        side = QVBoxLayout(self.sidebar)
+        side.setContentsMargins(16, 28, 16, 20)
+        side.setSpacing(5)
+        side.addWidget(_label("SafeRelief", "brand"))
+        side.addWidget(_label("Koordinasi tanggap bencana", "muted"))
+        side.addSpacing(24)
+        self.overview_button = _button("Dashboard")
+        self.overview_button.setProperty("nav", True)
+        self.overview_button.setCheckable(True)
+        self.overview_button.setChecked(True)
+        self.overview_button.clicked.connect(self.refresh_summary)
+        side.addWidget(self.overview_button)
+        self.nav_buttons: dict[str, QPushButton] = {}
+        self.group_buttons: dict[str, QToolButton] = {}
+        self.group_panels: dict[str, QWidget] = {}
+        self.menu = QMenu(self)
+        self.menu.setStyleSheet(MENU_STYLE)
+        overview = self.menu.addAction("Dashboard", self.refresh_summary)
+        overview.setCheckable(True)
+        overview.setChecked(True)
+        overview.triggered.connect(lambda: overview.setChecked(True))
+        for group, items in NAVIGATION:
+            if self._role != "admin" and group == "Administrasi":
+                continue
+            heading = QToolButton()
+            heading.setText(group)
+            heading.setProperty("groupToggle", True)
+            heading.setCheckable(True)
+            heading.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            heading.setMinimumHeight(44)
+            heading.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            heading.setCursor(Qt.CursorShape.PointingHandCursor)
+            heading.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            panel = QWidget()
+            panel_layout = QVBoxLayout(panel)
+            panel_layout.setContentsMargins(14, 0, 0, 6)
+            panel_layout.setSpacing(4)
+            self.group_buttons[group] = heading
+            self.group_panels[group] = panel
+            heading.toggled.connect(
+                lambda expanded, name=group: self._set_group_expanded(name, expanded)
             )
-        except PermissionError as exc:
-            QMessageBox.warning(self, "Akses ditolak", str(exc))
-            return
-        
-        summary = secure_store.get_dashboard_summary(self._conn)
-        by_status = summary["by_status"]
-        
-        while self.status_layout.count():
-            item = self.status_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            side.addSpacing(8)
+            side.addWidget(heading)
+            side.addWidget(panel)
+            submenu = self.menu.addMenu(group)
+            for page, title in items:
+                button = _button(title)
+                button.setProperty("nav", True)
+                button.clicked.connect(lambda _checked=False, target=page: self._navigate(target))
+                self.nav_buttons[page] = button
+                panel_layout.addWidget(button)
+                submenu.addAction(title, lambda target=page: self._navigate(target))
+            heading.setChecked(group == "Data lapangan")
+            self._set_group_expanded(group, heading.isChecked())
+        side.addStretch()
+        self.logout_button = _button("Logout")
+        self.logout_button.setProperty("nav", True)
+        self.logout_button.clicked.connect(self._confirm_logout)
+        side.addWidget(self.logout_button)
+        self.menu.addSeparator()
+        self.menu.addAction("Logout", self._confirm_logout)
+        self.menu.aboutToHide.connect(self._restore_menu_focus)
+        self.sidebar_scroll = QScrollArea()
+        self.sidebar_scroll.setWidgetResizable(True)
+        self.sidebar_scroll.setFixedWidth(218)
+        self.sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.sidebar_scroll.setWidget(self.sidebar)
+        outer.addWidget(self.sidebar_scroll)
 
-        # Konfigurasi Full Pastel (Background Soft & Teks Kontras Terbaca)
-        status_config = [
-            ("selamat", "Selamat", "#065F46", "#D1FAE5", "#A7F3D0"),
-            ("luka ringan", "Luka Ringan", "#92400E", "#FEF3C7", "#FDE68A"),
-            ("luka berat", "Luka Berat", "#991B1B", "#FEE2E2", "#FCA5A5"),
-            ("meninggal", "Meninggal", "#334155", "#F1F5F9", "#E2E8F0"),
-            ("tidak diketahui", "Tidak Diketahui", "#5B21B6", "#EDE9FE", "#DDD6FE"),
-        ]
+    def _set_group_expanded(self, group: str, expanded: bool) -> None:
+        """Panah dan status tombol selalu mengikuti visibilitas submenu."""
+        heading = self.group_buttons[group]
+        heading.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        heading.setAccessibleDescription("Kelompok terbuka" if expanded else "Kelompok tertutup")
+        self.group_panels[group].setVisible(expanded)
 
-        for key, label, text_color, bg_pastel, border_color in status_config:
-            count = by_status.get(key, 0)
+    def _build_header(self) -> None:
+        """Menu berlabel menggantikan sidebar saat jendela sempit."""
+        header = QHBoxLayout()
+        self.menu_button = QToolButton()
+        self.menu_button.setText("Menu")
+        self.menu_button.setAccessibleName("Buka menu navigasi")
+        self.menu_button.setMinimumSize(70, 44)
+        self.menu_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.menu_button.setMenu(self.menu)
+        header.addWidget(self.menu_button)
+        titles = QVBoxLayout()
+        titles.setSpacing(3)
+        titles.addWidget(_label("Ruang koordinasi", "muted"))
+        titles.addWidget(_label("Dashboard", "pageTitle"))
+        header.addLayout(titles, 1)
+        self.refresh_button = _button("Perbarui")
+        self.refresh_button.clicked.connect(self.refresh_summary)
+        header.addWidget(self.refresh_button)
+        self.work_layout.addLayout(header)
+
+    def _build_main_content(self) -> None:
+        """Status dan sebaran memakai data ringkasan yang sudah tersedia."""
+        self.main_content = QWidget()
+        main = QVBoxLayout(self.main_content)
+        main.setContentsMargins(0, 0, 0, 0)
+        main.setSpacing(24)
+        welcome = QFrame()
+        welcome.setObjectName("welcomePanel")
+        banner = QHBoxLayout(welcome)
+        banner.setContentsMargins(26, 24, 26, 24)
+        banner.setSpacing(16)
+        text = QVBoxLayout()
+        self.welcome_label = _label("", "welcomeTitle", True)
+        text.addWidget(self.welcome_label)
+        text.addWidget(_label("Pantau data korban dan koordinasikan bantuan dari sini.", "", True))
+        text.addSpacing(10)
+        self.victims_button = _button("Buka data korban")
+        self.victims_button.clicked.connect(lambda: self._navigate("victims"))
+        text.addWidget(self.victims_button, alignment=Qt.AlignmentFlag.AlignLeft)
+        banner.addLayout(text, 1)
+        self.hero_numbers = QWidget()
+        total = QVBoxLayout(self.hero_numbers)
+        total.setContentsMargins(0, 0, 0, 0)
+        self.total_label = _label("", "heroTotal")
+        self.total_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        total.addWidget(self.total_label)
+        caption = _label("korban tercatat", "", True)
+        caption.setAlignment(Qt.AlignmentFlag.AlignRight)
+        total.addWidget(caption)
+        self.hero_numbers.setFixedWidth(118)
+        banner.addWidget(self.hero_numbers)
+        main.addWidget(welcome)
+        main.addWidget(_label("Kondisi korban", "sectionTitle"))
+        self.status_container = QWidget()
+        self.status_layout = QGridLayout(self.status_container)
+        self.status_layout.setContentsMargins(0, 0, 0, 0)
+        self.status_layout.setSpacing(10)
+        self.status_cards: list[QFrame] = []
+        self.status_values: dict[str, QLabel] = {}
+        for key, title in STATUSES:
             card = QFrame()
-            card.setStyleSheet(
-                f"background-color: {bg_pastel}; "
-                f"border: 1px solid {border_color}; "
-                f"border-radius: 16px; "
-                f"padding: 12px;"
-            )
-            c_layout = QVBoxLayout(card)
-            c_layout.setSpacing(2)
-
-            lbl_num = QLabel(str(count))
-            lbl_num.setStyleSheet(f"font-size: 24px; font-weight: 800; color: {text_color};")
-            
-            lbl_name = QLabel(label.upper())
-            lbl_name.setStyleSheet(f"font-size: 10px; font-weight: 700; color: {text_color};")
-
-            c_layout.addWidget(lbl_num)
-            c_layout.addWidget(lbl_name)
-
-            self.status_layout.addWidget(card)
-
-        posko_lines = [
-            f"<b>{row['nama_posko']}</b>: {row['total']} Korban"
-            for row in summary["by_posko"]
-        ]
-        self.posko_summary_label.setText(
-            " • ".join(posko_lines) if posko_lines else "Belum ada posko terdaftar."
+            card.setObjectName("metricCard")
+            layout = QVBoxLayout(card)
+            layout.setContentsMargins(16, 18, 12, 18)
+            layout.setSpacing(8)
+            value = _label("", "metricValue")
+            layout.addWidget(value)
+            layout.addWidget(_label(title, "metricLabel", True))
+            self.status_cards.append(card)
+            self.status_values[key] = value
+        main.addWidget(self.status_container)
+        self.posko_card = QFrame()
+        self.posko_card.setObjectName("tablePanel")
+        panel = QVBoxLayout(self.posko_card)
+        panel.setContentsMargins(20, 20, 20, 18)
+        panel.setSpacing(12)
+        panel.addWidget(_label("Sebaran korban per posko", "sectionTitle"))
+        self.posko_summary_label = _label("", "muted", True)
+        panel.addWidget(self.posko_summary_label)
+        self.posko_table = QTableWidget(0, 2)
+        self.posko_table.setHorizontalHeaderLabels(("Posko", "Korban"))
+        self.posko_table.verticalHeader().hide()
+        self.posko_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.posko_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self.posko_table.horizontalHeader().setDefaultAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
+        self.posko_table.setColumnWidth(1, 84)
+        self.posko_table.verticalHeader().setDefaultSectionSize(50)
+        self.posko_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.posko_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.posko_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.posko_table.setShowGrid(False)
+        self.posko_table.setAlternatingRowColors(True)
+        self.posko_table.setMinimumHeight(200)
+        self.posko_table.setAccessibleName("Jumlah korban di setiap posko")
+        self.posko_table.setWordWrap(True)
+        panel.addWidget(self.posko_table)
+        main.addWidget(self.posko_card)
+        main.addStretch()
+
+    def _build_context(self) -> None:
+        """Panel samping memakai identitas sesi dan jumlah posko, bukan aktivitas rekaan."""
+        self.context_panel = QFrame()
+        self.context_panel.setObjectName("contextPanel")
+        context = QVBoxLayout(self.context_panel)
+        context.setContentsMargins(24, 24, 24, 24)
+        context.setSpacing(20)
+        identity = QHBoxLayout()
+        self.initials_label = _label("", "initials")
+        self.initials_label.setFixedSize(48, 48)
+        self.initials_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.initials_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        identity.addWidget(self.initials_label)
+        details = QVBoxLayout()
+        self.identity_label = _label("", "identityName", True)
+        self.role_badge = _label("Admin" if self._role == "admin" else "Relawan", "muted")
+        details.addWidget(self.identity_label)
+        details.addWidget(self.role_badge)
+        identity.addLayout(details, 1)
+        context.addLayout(identity)
+        self.date_label = _label("", "muted", True)
+        context.addWidget(self.date_label)
+        context.addWidget(_label("Ringkasan lapangan", "sectionTitle"))
+        stats_panel = QFrame()
+        stats_panel.setObjectName("contextStats")
+        stats = QVBoxLayout(stats_panel)
+        stats.setContentsMargins(18, 18, 18, 18)
+        stats.setSpacing(6)
+        self.posko_count_label = _label("", "contextValue")
+        stats.addWidget(self.posko_count_label)
+        stats.addWidget(_label("posko terdaftar", "muted"))
+        stats.addSpacing(12)
+        self.unassigned_label = _label("", "contextValue")
+        stats.addWidget(self.unassigned_label)
+        stats.addWidget(_label("korban belum terkait posko", "muted", True))
+        context.addWidget(stats_panel)
+        context.addWidget(_label("Akses cepat", "sectionTitle"))
+        self.chat_button = _button("Buka chat koordinasi")
+        self.chat_button.clicked.connect(lambda: self._navigate("chat"))
+        self.aid_button = _button("Lihat distribusi bantuan")
+        self.aid_button.clicked.connect(lambda: self._navigate("aid"))
+        context.addWidget(self.chat_button)
+        context.addWidget(self.aid_button)
+        notice = QFrame()
+        notice.setObjectName("noticePanel")
+        note = QVBoxLayout(notice)
+        note.setContentsMargins(16, 16, 16, 16)
+        note.addWidget(_label("Selama bertugas", "sectionTitle"))
+        note.addWidget(_label("Biarkan dongle tetap terpasang. Sesi berakhir otomatis saat dongle dicabut.", "muted", True))
+        context.addWidget(notice)
+        context.addStretch()
+
+    def _show_identity(self, user: dict) -> None:
+        """Inisial berasal dari akun aktif, tanpa foto profil rekaan."""
+        name = str(user.get("nama_lengkap") or user.get("username") or "")
+        self.welcome_label.setText(f"Selamat datang, {name}")
+        self.identity_label.setText(name)
+        self.initials_label.setText("".join(word[0] for word in name.split()[:2]).upper())
+
+    def _require_active_session(self) -> dict:
+        """Widget sesi lama tidak boleh menavigasi atas nama sesi berbeda."""
+        user = session.get_current_user()
+        if int(user["id"]) != self._user_id or user.get("role") != self._role:
+            raise PermissionError("Sesi pengguna telah berubah.")
+        secure_store.require_active_user(self._conn, self._user_id, self._role)
+        return user
+
+    def _navigate(self, target: str) -> None:
+        """Pertahankan sinyal navigasi yang digunakan MainWindow."""
+        if target not in self.nav_buttons:
+            return
+        try:
+            self._require_active_session()
+        except (PermissionError, RuntimeError, sqlite3.Error) as exc:
+            self.data_message.setText(f"Akses ditolak: {exc}")
+            return
+        self.page_requested.emit(target)
+
+    def refresh_summary(self) -> None:
+        """Tampilkan data, keadaan kosong, atau kegagalan tanpa angka lama."""
+        self.overview_button.setChecked(True)
+        self.data_message.setText("Memuat ringkasan korban...")
+        self.refresh_button.setEnabled(False)
+        self.refresh_button.setCursor(Qt.CursorShape.ForbiddenCursor)
+        self.data_message.repaint()
+        try:
+            user = self._require_active_session()
+            summary = secure_store.get_dashboard_summary(self._conn)
+            self._show_identity(user)
+            self.date_label.setText(QLocale("id_ID").toString(QDate.currentDate(), "dddd, d MMMM yyyy"))
+            self._summary = summary
+            by_status = summary["by_status"]
+            total = sum(by_status.values())
+            self.total_label.setText(str(total))
+            for key, _title in STATUSES:
+                self.status_values[key].setText(str(by_status.get(key, 0)))
+            rows = summary["by_posko"]
+            self.posko_count_label.setText(str(len(rows)))
+            self.unassigned_label.setText(str(max(0, total - sum(row["total"] for row in rows))))
+            self.posko_table.setRowCount(len(rows))
+            for index, row in enumerate(rows):
+                self.posko_table.setItem(index, 0, QTableWidgetItem(str(row["nama_posko"])))
+                count = QTableWidgetItem(str(row["total"]))
+                count.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.posko_table.setItem(index, 1, count)
+            self.posko_table.resizeRowsToContents()
+            self.posko_table.setVisible(bool(rows))
+            self.posko_summary_label.setText(
+                "Jumlah korban tercatat di setiap posko." if rows
+                else "Belum ada posko terdaftar. " + (
+                    "Tambahkan melalui Manajemen Posko." if self._role == "admin"
+                    else "Hubungi admin untuk pendaftaran posko."
+                )
+            )
+            self.data_message.setText(
+                "Belum ada data korban. Buka Data Korban untuk mulai mendata."
+                if not total else f"{total} korban tercatat. Ringkasan berdasarkan data yang tersimpan."
+            )
+        except (PermissionError, RuntimeError, sqlite3.Error) as exc:
+            self._clear_summary()
+            self.data_message.setText(f"Ringkasan gagal dimuat: {exc}. Klik Perbarui untuk mencoba lagi.")
+        finally:
+            self.refresh_button.setEnabled(True)
+            self.refresh_button.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def _clear_summary(self) -> None:
+        """Kosongkan data lama ketika pembacaan gagal atau sesi berakhir."""
+        self._summary = None
+        self.total_label.clear()
+        self.posko_count_label.clear()
+        self.unassigned_label.clear()
+        self.posko_summary_label.clear()
+        self.posko_table.setRowCount(0)
+        self.posko_table.hide()
+        for value in self.status_values.values():
+            value.clear()
+
+    def _adapt_layout(self) -> None:
+        """Pindahkan panel konteks dan susun ulang kartu sesuai ruang baca."""
+        width = self.width()
+        mode = "wide" if width >= 1180 else "medium" if width >= 720 else "compact"
+        self.sidebar_scroll.setVisible(mode != "compact")
+        self.menu_button.setVisible(mode == "compact")
+        self.hero_numbers.setVisible(width >= 520)
+        margin = 16 if mode == "compact" else 28
+        self.work_layout.setContentsMargins(margin, 24, margin, 24)
+        columns = 5 if width >= 1050 else 3 if width >= 720 else 2
+        for index, card in enumerate(self.status_cards):
+            self.status_layout.addWidget(card, index // columns, index % columns)
+        if mode == self._layout_mode:
+            return
+        self._layout_mode = mode
+        if mode == "wide":
+            self.context_panel.setFixedWidth(268)
+            self.body.addWidget(self.context_panel, 0, 1)
+        else:
+            self.context_panel.setMinimumWidth(0)
+            self.context_panel.setMaximumWidth(16777215)
+            self.body.addWidget(self.context_panel, 1, 0)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._adapt_layout()
+
+    def _restore_menu_focus(self) -> None:
+        """Kembalikan fokus ke pemicu setelah Escape atau pemilihan menu."""
+        if self.menu_button.isVisible():
+            QTimer.singleShot(0, self.menu_button.setFocus)
 
     def _confirm_logout(self) -> None:
-        """Konfirmasi logout manual dan delegasikan seluruh flow ke MainWindow."""
-        parent = self.parent()
-        window = self.window()
-        dialog_parent = parent if parent is not None else window
-        if dialog_parent is None:
-            return
+        """Gunakan konfirmasi dan pembersihan sesi terpusat di MainWindow."""
         reply = QMessageBox.question(
-            dialog_parent,
-            "Logout",
-            "Yakin ingin logout?",
+            self, "Logout", "Yakin ingin logout?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
-        if reply == QMessageBox.StandardButton.Yes:
-            if hasattr(window, "_end_session"):
-                window._end_session("Logout manual dari dashboard.")
+        if reply == QMessageBox.StandardButton.Yes and hasattr(self.window(), "_end_session"):
+            self.window()._end_session("Logout manual dari dashboard.")
 
     def clear_sensitive_state(self) -> None:
+        """Hapus identitas dan ringkasan ketika sesi berakhir."""
+        self.menu.close()
+        self._clear_summary()
         self.welcome_label.clear()
-        self.posko_summary_label.clear()
+        self.identity_label.clear()
+        self.initials_label.clear()
+        self.date_label.clear()
+        self.data_message.clear()
