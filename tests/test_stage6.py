@@ -169,8 +169,44 @@ def test_end_session_after_opening_volunteers_cancels_enrollment(
         assert calls[:2] == ["interrupt", "wait"]
         assert "rejected" in calls
         assert not dialog.isVisible()
+        logout_logs = [row for row in db.list_activity_log(conn) if row["aksi"] == "LOGOUT"]
+        assert len(logout_logs) == 1
+        assert logout_logs[0]["user_id"] == admin_id
+        assert logout_logs[0]["detail"] == {
+            "manual": "manual", "close": "window_closed",
+            "blocked": "account_inactive", "dongle_removed": "dongle_removed",
+        }[reason]
         if reason != "close":
             assert window.pages.currentWidget() in (window.gate_page, window.login_page)
+    finally:
+        window.close()
+        qapp.processEvents()
+
+
+def test_logout_clears_session_even_when_activity_log_fails(
+    admin_context, monkeypatch: pytest.MonkeyPatch, qapp, tmp_path: Path,
+) -> None:
+    """Gangguan SQLite tidak boleh menghalangi pembersihan sesi dan halaman."""
+    import sqlite3
+    from auth import login
+
+    conn, admin_id, _volunteer_id = admin_context
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "stage6.db")
+    monkeypatch.setattr(dongle, "is_any_valid_dongle_present", lambda _conn: True)
+    window = MainWindow()
+    session.login(dict(db.get_user_by_id(conn, admin_id)), os.urandom(32))
+    window._show_dashboard(session.get_current_user())
+
+    def fail_log(*_args) -> None:
+        raise sqlite3.OperationalError("log unavailable")
+
+    monkeypatch.setattr(login, "logout", fail_log)
+    try:
+        window._end_session("Logout manual")
+        assert not session.is_logged_in()
+        assert window.dashboard_page is None
+        assert window.pages.currentWidget() is window.login_page
+        assert "gagal disimpan" in window.statusBar().currentMessage()
     finally:
         window.close()
         qapp.processEvents()

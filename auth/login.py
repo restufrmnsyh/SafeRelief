@@ -38,7 +38,7 @@ def authenticate(
     password: str,
 ) -> dict:
     """
-    Verifikasi username + password. Mengembalikan dict user jika sukses.
+    Verifikasi username + password; hasilnya belum merupakan login tiga faktor.
 
     Urutan pemeriksaan (penting — jangan diubah):
     1. Cari user; jika tidak ada → error generik (tanpa info user tidak ada)
@@ -47,7 +47,7 @@ def authenticate(
        pesan berbeda karena user perlu tahu kapan bisa coba lagi)
     4. Verifikasi password Argon2
     5. Jika gagal: increment failed_attempts, kunci jika sudah 3x
-    6. Jika sukses: reset counter, catat log
+    6. Password benar: reset counter, catat PASSWORD_VERIFIED
 
     Args:
         conn    : Koneksi database.
@@ -55,7 +55,7 @@ def authenticate(
         password: Password plaintext yang diketik user.
 
     Returns:
-        dict user (semua kolom dari tabel users) jika login berhasil.
+        dict user (semua kolom dari tabel users) jika password valid.
 
     Raises:
         ValueError: Login gagal dengan pesan yang sesuai:
@@ -117,15 +117,15 @@ def authenticate(
 
         raise ValueError(_GENERIC_ERROR)
 
-    # --- 5. Login sukses: reset counter dan catat log ---
+    # Wajah dan dongle masih harus diperiksa sebelum LOGIN_SUCCESS dicatat.
     db.update_user_login_attempt(conn, user_id, 0, None)
-    db.log_activity(conn, "LOGIN_SUCCESS", user_id=user_id)
+    db.log_activity(conn, "PASSWORD_VERIFIED", user_id=user_id)
 
     # Kembalikan dict (bukan sqlite3.Row) agar mudah dipakai di luar
     return dict(row)
 
 
-def logout(conn: sqlite3.Connection, user_id: int) -> None:
+def logout(conn: sqlite3.Connection, user_id: int, reason: str = "manual") -> None:
     """
     Catat event logout ke activity_log.
 
@@ -136,4 +136,4 @@ def logout(conn: sqlite3.Connection, user_id: int) -> None:
         conn   : Koneksi database.
         user_id: ID user yang logout.
     """
-    db.log_activity(conn, "LOGOUT", user_id=user_id)
+    db.log_activity(conn, "LOGOUT", user_id=user_id, detail=reason)

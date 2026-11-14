@@ -232,6 +232,11 @@ def test_face_enrollment_dialog_shows_live_feed_and_captures_encoding(
     assert dialog.camera_label.pixmap() is not None
 
     dialog.capture_face()
+    from time import monotonic, sleep
+    deadline = monotonic() + 5
+    while dialog._capture_worker is not None and monotonic() < deadline:
+        qapp.processEvents()
+        sleep(0.005)
     assert dialog.capture_result is not None
     assert dialog.capture_result.shape == (128,)
     assert dialog.status_label.text() == "Wajah berhasil direkam!"

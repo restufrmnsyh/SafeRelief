@@ -168,14 +168,15 @@ class TestLogin:
         assert row["failed_attempts"] == 0
         assert row["locked_until"] is None
 
-    def test_login_logs_success(self, conn):
-        """Login sukses dicatat di activity_log."""
+    def test_password_verified_is_not_a_complete_login(self, conn):
+        """Password benar belum membuktikan dongle dan wajah."""
         _make_user(conn, username="harry", password="h_pass")
         auth_login.authenticate(conn, "harry", "h_pass")
 
         logs = db.list_activity_log(conn)
         aksi_list = [r["aksi"] for r in logs]
-        assert "LOGIN_SUCCESS" in aksi_list
+        assert "PASSWORD_VERIFIED" in aksi_list
+        assert "LOGIN_SUCCESS" not in aksi_list
 
     def test_login_logs_failure(self, conn):
         """Login gagal dicatat di activity_log."""

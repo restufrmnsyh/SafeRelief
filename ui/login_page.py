@@ -22,6 +22,7 @@ import config
 from auth import dongle, face_auth, login, session
 from crypto import keys
 from database import db, secure_store
+from ui.face_capture_worker import FaceCaptureWorker, MODEL_LOCK
 
 
 class CameraWorker(QThread):
@@ -67,18 +68,34 @@ class FaceVerificationWorker(QThread):
     def __init__(
         self, stored_encoding: np.ndarray, frame: np.ndarray
     ) -> None:
-        super().__init__()
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        super().__init__(app)
         self._stored_encoding = stored_encoding.copy()
         self._frame = frame.copy()
+        self.finished.connect(self.deleteLater)
+        if app is not None:
+            app.aboutToQuit.connect(self.shutdown)
+
+    def shutdown(self) -> None:
+        """Selesaikan inferensi sebelum aplikasi menghancurkan worker."""
+        self.requestInterruption()
+        self.wait()
 
     def run(self) -> None:
         try:
-            matched, score = face_auth.verify_face(
-                self._stored_encoding, self._frame
-            )
-            self.completed.emit(matched, score, "")
+            with MODEL_LOCK:
+                if self.isInterruptionRequested():
+                    return
+                matched, score = face_auth.verify_face(
+                    self._stored_encoding, self._frame
+                )
+            if not self.isInterruptionRequested():
+                self.completed.emit(matched, score, "")
         except (FileNotFoundError, ValueError, cv2.error) as exc:
-            self.completed.emit(False, 0.0, str(exc))
+            if not self.isInterruptionRequested():
+                self.completed.emit(False, 0.0, str(exc))
 
 
 class LoginPage(QWidget):
@@ -102,6 +119,7 @@ class LoginPage(QWidget):
         self._camera_worker: CameraWorker | None = None
         self._face_worker: FaceVerificationWorker | None = None
         self._registration_mode = False
+        self._capture_worker: FaceCaptureWorker | None = None
 
         # Latar berbasis soft blue agar lebih konsisten dengan desain aplikasi.
         self.setStyleSheet(
@@ -456,20 +474,35 @@ class LoginPage(QWidget):
             self.message_label.setText("Sesi pendaftaran wajah belum siap.")
             return
 
-        embeddings: list[np.ndarray] = []
-        for frame in self._recent_frames:
-            emb = face_auth._detect_and_embed(frame)
-            if emb is not None:
-                embeddings.append(emb)
+        if self._capture_worker is not None:
+            return
+        frames = list(self._recent_frames)
+        if not frames and self._last_frame is not None:
+            frames = [self._last_frame]
+        if not frames:
+            self.message_label.setText("Tunggu sampai frame webcam tersedia.")
+            return
+        worker = FaceCaptureWorker(frames)
+        self._capture_worker = worker
+        worker.completed.connect(self._registration_finished)
+        worker.finished.connect(self._capture_finished)
+        self.verify_face_button.setEnabled(False)
+        self.message_label.setText("Merekam wajah...")
+        worker.start()
 
-        if not embeddings and self._last_frame is not None:
-            emb = face_auth._detect_and_embed(self._last_frame)
-            if emb is not None:
-                embeddings.append(emb)
+    def _capture_finished(self) -> None:
+        """Hasil dari permintaan lama tidak boleh mengubah kontrol sesi baru."""
+        if self.sender() is self._capture_worker:
+            self._capture_worker = None
+            if self._gate_open and self._preauth_user is not None:
+                self.verify_face_button.setEnabled(True)
 
-        if not embeddings:
-            self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
-            self.message_label.setText("Wajah tidak terdeteksi di feed kamera. Posisikan wajah dengan jelas.")
+    def _registration_finished(self, average_encoding: object, error: str) -> None:
+        """Simpan hasil hanya jika permintaan dan faktor autentikasi masih berlaku."""
+        if self.sender() is not self._capture_worker or not self._gate_open:
+            return
+        if error:
+            self.message_label.setText(error)
             return
 
         user = self._preauth_user
@@ -482,7 +515,8 @@ class LoginPage(QWidget):
             return
 
         try:
-            average_encoding = np.mean(embeddings, axis=0).astype(np.float32)
+            current_user = secure_store.require_active_user(self._conn, int(user["id"]))
+            dongle.verify_dongle(current_user)
             secure_store.save_face_encoding(
                 self._conn,
                 db_key,
@@ -493,7 +527,8 @@ class LoginPage(QWidget):
             self._registration_mode = False
             self._set_face_controls_visible(True)
             self.message_label.setStyleSheet("color: #059669; font-size: 11px; font-weight: 600; border: none;")
-            self.message_label.setText("Wajah berhasil didaftarkan. Lanjutkan verifikasi wajah.")
+            self.message_label.setText("Wajah berhasil didaftarkan.")
+            db.log_activity(self._conn, "LOGIN_SUCCESS", user_id=int(user["id"]))
             session.login(user, bytes(master_key))
             self._clear_pre_auth()
             self.authenticated.emit(user)
@@ -532,7 +567,8 @@ class LoginPage(QWidget):
     def _face_verification_finished(
         self, matched: bool, score: float, error: str
     ) -> None:
-        if not self._gate_open:
+        if (self.sender() is not None and self.sender() is not self._face_worker
+                or not self._gate_open):
             return
         if error:
             self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
@@ -563,6 +599,7 @@ class LoginPage(QWidget):
             if current_user is None or not current_user["is_active"]:
                 raise PermissionError("Akun dinonaktifkan saat proses login.")
             dongle.verify_dongle(current_user)
+            db.log_activity(self._conn, "LOGIN_SUCCESS", user_id=int(user["id"]))
         except (OSError, ValueError, sqlite3.Error, PermissionError) as exc:
             self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
             self.message_label.setText(str(exc))
@@ -574,6 +611,8 @@ class LoginPage(QWidget):
         self.authenticated.emit(user)
 
     def _face_worker_finished(self) -> None:
+        if self.sender() is not self._face_worker:
+            return
         self._face_worker = None
         if self._gate_open:
             self.verify_face_button.setEnabled(True)
@@ -593,6 +632,12 @@ class LoginPage(QWidget):
         self.verify_face_button.setEnabled(True)
 
     def _clear_pre_auth(self) -> None:
+        if self._face_worker is not None:
+            self._face_worker.requestInterruption()
+            self._face_worker = None
+        if self._capture_worker is not None:
+            self._capture_worker.requestInterruption()
+            self._capture_worker = None
         self.stop_camera()
         self._registration_mode = False
         self._recent_frames.clear()

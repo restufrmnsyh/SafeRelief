@@ -88,7 +88,7 @@ class MainWindow(QMainWindow):
             is_valid = dongle.is_any_valid_dongle_present(self._conn)
         except (OSError, sqlite3.Error) as exc:
             if session.is_logged_in():
-                self._end_session(f"Gagal memeriksa dongle: {exc}")
+                self._end_session(f"Gagal memeriksa dongle: {exc}", "dongle_check_failed")
             else:
                 self._show_gate(f"Gagal memeriksa dongle: {exc}")
             return
@@ -98,11 +98,11 @@ class MainWindow(QMainWindow):
                 user_id = int(session.get_current_user()["id"])
                 user = db.get_user_by_id(self._conn, user_id)
                 if user is None or not user["is_active"]:
-                    self._end_session("Akun dinonaktifkan, sesi diakhiri")
+                    self._end_session("Akun dinonaktifkan, sesi diakhiri", "account_inactive")
                     return
                 dongle.verify_dongle(user)
             except (OSError, ValueError, sqlite3.Error, PermissionError):
-                self._end_session("Dongle dicabut, sesi diakhiri")
+                self._end_session("Dongle dicabut, sesi diakhiri", "dongle_removed")
                 return
             return
 
@@ -119,11 +119,24 @@ class MainWindow(QMainWindow):
             self.pages.setCurrentWidget(self.login_page)
             self._logout_notice = None
 
-    def _end_session(self, message: str) -> None:
+    def _clear_session_with_log(self, reason: str) -> None:
+        """Kegagalan menulis log tidak boleh mempertahankan kunci sesi."""
+        from auth import login, session
+
+        if not session.is_logged_in():
+            return
+        user_id = int(session.get_current_user()["id"])
+        session.logout()
+        try:
+            login.logout(self._conn, user_id, reason)
+        except sqlite3.Error:
+            self.statusBar().showMessage("Log logout gagal disimpan.")
+
+    def _end_session(self, message: str, reason: str = "manual") -> None:
         """Buang halaman berkunci dan paksa gerbang sebelum login berikutnya."""
         from auth import session
 
-        session.logout()
+        self._clear_session_with_log(reason)
         self._discard_authenticated_pages()
         self._logout_notice = message
         self.login_page.set_gate_status("Mencari dongle...")
@@ -175,7 +188,7 @@ class MainWindow(QMainWindow):
         try:
             secure_store.require_active_user(self._conn, int(user["id"]))
         except PermissionError:
-            self._end_session("Akun dinonaktifkan, sesi diakhiri")
+            self._end_session("Akun dinonaktifkan, sesi diakhiri", "account_inactive")
             return
         if self.dashboard_page is None:
             self.dashboard_page = DashboardPage(self._conn, self)
@@ -198,7 +211,7 @@ class MainWindow(QMainWindow):
                 self._conn, int(session.get_current_user()["id"]), str(role)
             )
         except PermissionError:
-            self._end_session("Akun dinonaktifkan, sesi diakhiri")
+            self._end_session("Akun dinonaktifkan, sesi diakhiri", "account_inactive")
             return
         allowed_pages = {
             "admin": {
@@ -300,9 +313,9 @@ class MainWindow(QMainWindow):
         try:
             if hasattr(self, "_dongle_timer"):
                 self._dongle_timer.stop()
+            self.login_page._clear_pre_auth()
+            self._clear_session_with_log("window_closed")
             self._discard_authenticated_pages()
-            if session.is_logged_in():
-                session.logout()
             if getattr(self, "_conn", None) is not None:
                 self._conn.close()
                 self._conn = None
@@ -321,7 +334,7 @@ class MainWindow(QMainWindow):
                 str(session.get_current_user()["role"]),
             )
         except PermissionError:
-            self._end_session("Akun dinonaktifkan, sesi diakhiri")
+            self._end_session("Akun dinonaktifkan, sesi diakhiri", "account_inactive")
             return
         if self.dashboard_page is not None:
             self.dashboard_page.refresh_summary()

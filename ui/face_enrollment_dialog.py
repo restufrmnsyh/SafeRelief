@@ -10,8 +10,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
-from auth import face_auth
 from ui.login_page import CameraWorker
+from ui.face_capture_worker import FaceCaptureWorker
 
 
 class FaceEnrollmentDialog(QDialog):
@@ -31,6 +31,8 @@ class FaceEnrollmentDialog(QDialog):
         self._last_frame: np.ndarray | None = None
         self._recent_frames: deque[np.ndarray] = deque(maxlen=6)
         self._capture_result: np.ndarray | None = None
+        self._capture_worker: FaceCaptureWorker | None = None
+        self._cancelled = False
 
         self.instruction_label = QLabel(
             f"Posisikan wajah {volunteer_name} di tengah frame, lalu klik Rekam Wajah"
@@ -114,36 +116,41 @@ class FaceEnrollmentDialog(QDialog):
         self.status_label.setText(message)
         self.capture_button.setEnabled(False)
 
-    def _collect_recent_embeddings(self) -> list[np.ndarray]:
-        embeddings: list[np.ndarray] = []
-        for frame in self._recent_frames:
-            embedding = face_auth._detect_and_embed(frame)
-            if embedding is not None:
-                embeddings.append(embedding)
-        if not embeddings and self._last_frame is not None:
-            embedding = face_auth._detect_and_embed(self._last_frame)
-            if embedding is not None:
-                embeddings.append(embedding)
-        return embeddings
-
     def capture_face(self) -> None:
         """Ambil embedding dari feed kamera aktif dan simpan sebagai kandidat wajah."""
         if self._camera_worker is None or not self._camera_worker.isRunning():
             self.status_label.setText("Kamera belum siap. Coba lagi beberapa saat.")
             return
 
+        if self._cancelled or self._capture_worker is not None:
+            return
+        frames = list(self._recent_frames)
+        if not frames and self._last_frame is not None:
+            frames = [self._last_frame]
         self.capture_button.setEnabled(False)
         self.status_label.setText("Merekam... jangan bergerak")
 
-        embeddings = self._collect_recent_embeddings()
-        if not embeddings:
-            self.status_label.setText(
-                "Wajah tidak terdeteksi di frame. Posisikan wajah di tengah kamera."
-            )
-            self.capture_button.setEnabled(True)
-            return
+        worker = FaceCaptureWorker(frames)
+        self._capture_worker = worker
+        worker.completed.connect(self._capture_completed)
+        worker.finished.connect(self._capture_finished)
+        worker.start()
 
-        self._capture_result = np.mean(embeddings, axis=0).astype(np.float32)
+    def _capture_finished(self) -> None:
+        """Aktifkan tombol coba lagi setelah worker selesai."""
+        if self.sender() is self._capture_worker:
+            self._capture_worker = None
+            if not self._cancelled:
+                self.capture_button.setEnabled(True)
+
+    def _capture_completed(self, encoding: object, error: str) -> None:
+        """Abaikan hasil yang tiba setelah dialog dibatalkan."""
+        if self._cancelled or self.sender() is not self._capture_worker:
+            return
+        if error:
+            self.status_label.setText(error)
+            return
+        self._capture_result = encoding
         self.status_label.setText("Wajah berhasil direkam!")
         self.capture_button.setText("Simpan Wajah")
         self.capture_button.setEnabled(True)
@@ -162,9 +169,16 @@ class FaceEnrollmentDialog(QDialog):
         super().accept()
 
     def reject(self) -> None:
+        self._cancelled = True
+        if self._capture_worker is not None:
+            self._capture_worker.requestInterruption()
+            self._capture_worker = None
+        self._capture_result = None
+        self._recent_frames.clear()
+        self._last_frame = None
         self.stop_camera()
         super().reject()
 
     def closeEvent(self, event) -> None:
-        self.stop_camera()
+        self.reject()
         super().closeEvent(event)
