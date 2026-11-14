@@ -147,7 +147,7 @@ def test_dialog_theme_preserves_validation_and_password_masking(
     else:
         dialog = DongleChangeDialog(["Z:\\"])
     try:
-        assert dialog.objectName() == "dashboardPage"
+        assert dialog.objectName() == "formDialog"
         with pytest.raises(ValueError):
             dialog.values()
         if hasattr(dialog, "password_input"):

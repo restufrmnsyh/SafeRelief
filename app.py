@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication
 
 from database import db
 from ui.main_window import MainWindow
+from ui.popup_theme import install_popup_theme
 
 
 def _apply_light_theme(app: QApplication) -> None:
@@ -153,6 +154,7 @@ def _apply_light_theme(app: QApplication) -> None:
         }
         """
     )
+    install_popup_theme(app)
 
 
 def main() -> int:

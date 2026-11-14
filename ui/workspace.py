@@ -14,7 +14,7 @@ from auth import session
 from database import secure_store
 from ui.dashboard_page import NAVIGATION
 from ui.dashboard_style import DASHBOARD_STYLE, MENU_STYLE
-from ui.workspace_style import WORKSPACE_STYLE
+from ui.workspace_style import FORM_DIALOG_STYLE, WORKSPACE_STYLE
 
 
 PAGE_INFO = {
@@ -427,8 +427,15 @@ def install_workspace(page: QWidget, current: str) -> FeatureWorkspace:
 
 def style_dialog(dialog: QDialog) -> None:
     """Selaraskan tampilan field tanpa mengubah nilai atau validasinya."""
-    dialog.setObjectName("dashboardPage")
-    dialog.setStyleSheet(DASHBOARD_STYLE + WORKSPACE_STYLE)
+    # Nama berbeda mencegah dialog cocok dengan selector transparan milik dashboard.
+    dialog.setObjectName("formDialog")
+    dialog.setStyleSheet(FORM_DIALOG_STYLE)
+    palette = dialog.palette()
+    palette.setColor(QPalette.ColorRole.Window, QColor("#FFFFFF"))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor("#20243C"))
+    dialog.setPalette(palette)
+    dialog.setAutoFillBackground(True)
+    dialog.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
     _readable_placeholders(dialog)
     for button in dialog.findChildren(QPushButton):
         button.setMinimumHeight(44)
@@ -442,12 +449,14 @@ def style_dialog(dialog: QDialog) -> None:
         if cancel is not None:
             cancel.setText("Batal")
     layout = dialog.layout()
+    field_count = 0
     if layout is not None:
         button_boxes = dialog.findChildren(QDialogButtonBox)
         for buttons in button_boxes:
             _remove_widget(layout, buttons)
         for form in _layouts(layout):
             if isinstance(form, QFormLayout):
+                field_count += form.rowCount()
                 form.setSpacing(12)
                 form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
                 form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
@@ -459,12 +468,28 @@ def style_dialog(dialog: QDialog) -> None:
         root = QVBoxLayout(dialog)
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(16)
-        root.addWidget(label(dialog.windowTitle(), "workspaceTitle"))
+        heading = QVBoxLayout()
+        heading.setSpacing(6)
+        heading.addWidget(label(dialog.windowTitle(), "workspaceTitle"))
+        description = {
+            "Tambah Korban": "Isi data korban dan pilih posko penempatan.",
+            "Edit Data Korban": "Perbarui data korban yang dipilih.",
+            "Tambah Posko": "Tentukan nama, lokasi, dan kapasitas posko.",
+            "Edit Posko": "Perbarui informasi posko yang dipilih.",
+            "Tambah Relawan": "Isi profil dan kredensial awal sebelum pendaftaran wajah.",
+            "Edit Relawan": "Perbarui profil atau reset password relawan.",
+            "Ganti Dongle Relawan": "Pilih dongle baru dan konfirmasikan password relawan.",
+        }.get(dialog.windowTitle())
+        if description:
+            heading.addWidget(label(description, "dialogSubtitle"))
+        root.addLayout(heading)
         root.addWidget(scroll, 1)
         for buttons in button_boxes:
             root.addWidget(buttons)
     screen = dialog.screen()
-    height = min(760, screen.availableGeometry().height() - 80) if screen else 680
+    available_height = min(760, screen.availableGeometry().height() - 80) if screen else 680
+    desired_height = max(360, 180 + field_count * 56) if field_count else 640
+    height = min(available_height, desired_height)
     dialog.resize(960 if dialog.findChildren(QTableWidget) else 640, height)
-    dialog.setStyleSheet(DASHBOARD_STYLE + WORKSPACE_STYLE)
+    dialog.setStyleSheet(FORM_DIALOG_STYLE)
     _readable_placeholders(dialog)

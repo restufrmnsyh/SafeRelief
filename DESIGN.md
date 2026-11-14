@@ -35,5 +35,8 @@ Reading this as: dashboard koordinasi untuk admin dan relawan bencana, dengan si
 - Ciphertext memakai Consolas untuk memudahkan pembacaan karakter; judul dan teks operasional tetap Segoe UI.
 - Formulir dialog memakai bidang putih, judul tegas, serta tombol Simpan/Batal di luar area gulir agar tetap dapat dijangkau.
 - Tidak menambahkan ilustrasi, foto profil, angka contoh pada data organisasi, atau mekanisme autentikasi baru.
+- Popup informasi/peringatan/error/konfirmasi memakai stylesheet lokal dengan permukaan putih agar tidak mewarisi transparansi halaman; tombol dan pilihan default tetap native Qt.
+- Daftar pilihan dropdown memakai permukaan putih dan warna seleksi kontras agar teks tetap terbaca ketika popup terpisah dari halaman induknya.
+- Formulir memakai selector `formDialog` yang terpisah dari dashboard, dengan latar putih opaque, judul 22 px, keterangan singkat, dan tinggi yang mengikuti jumlah field agar formulir pendek tidak menyisakan ruang berlebihan.
 
 Arah ini menjadi acuan halaman berikutnya setelah dashboard disetujui pengguna.
