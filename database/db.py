@@ -291,6 +291,17 @@ def list_posko(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return cur.fetchall()
 
 
+def list_posko_with_counts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Hitung relasi secara terpisah agar jumlah korban dan relawan tidak berlipat."""
+    return conn.execute(
+        "SELECT p.*, "
+        "(SELECT COUNT(*) FROM victims v WHERE v.posko_id = p.id) AS victim_count, "
+        "(SELECT COUNT(*) FROM users u WHERE u.posko_id = p.id "
+        "AND u.role = 'relawan') AS volunteer_count "
+        "FROM posko p ORDER BY p.id"
+    ).fetchall()
+
+
 def update_posko(
     conn: sqlite3.Connection,
     posko_id: int,

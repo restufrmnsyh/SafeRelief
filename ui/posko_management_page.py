@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from auth import session
-from database import db, secure_store
+from database import secure_store
 
 
 class PoskoFormDialog(QDialog):
@@ -84,6 +84,7 @@ class PoskoManagementPage(QWidget):
         secure_store.require_active_user(
             self._conn, int(user["id"]), str(user["role"])
         )
+        self._user_id = int(user["id"])
         self._last_deleted_id: int | None = None
 
         self.setStyleSheet(
@@ -152,29 +153,32 @@ class PoskoManagementPage(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             window._end_session("Logout manual dari halaman posko.")
 
-    def refresh(self) -> None:
-        """Muattabel posko dan hitung pengguna/korban yang terikat."""
+    def _require_admin(self) -> None:
+        """Widget sesi lama tidak boleh bertindak atas nama sesi baru."""
         try:
-            rows = db.list_posko(self._conn)
+            user = session.get_current_user()
+        except RuntimeError as exc:
+            raise PermissionError("Sesi admin sudah berakhir.") from exc
+        if int(user["id"]) != self._user_id or user.get("role") != "admin":
+            raise PermissionError("Sesi admin telah berubah.")
+        secure_store.require_active_user(self._conn, self._user_id, "admin")
+
+    def refresh(self) -> None:
+        """Muat tabel hanya selama pemilik halaman masih berhak mengaksesnya."""
+        try:
+            self._require_admin()
+            rows = secure_store.list_admin_posko(self._conn, self._user_id)
             self.table.setRowCount(0)
             for posko in rows:
                 posko_id = int(posko["id"])
-                victim_count = self._conn.execute(
-                    "SELECT COUNT(*) FROM victims WHERE posko_id = ?",
-                    (posko_id,),
-                ).fetchone()[0]
-                volunteer_count = self._conn.execute(
-                    "SELECT COUNT(*) FROM users WHERE posko_id = ? AND role = 'relawan'",
-                    (posko_id,),
-                ).fetchone()[0]
                 row = self.table.rowCount()
                 self.table.insertRow(row)
                 values = (
                     posko["nama"],
                     posko["lokasi"],
                     posko["kapasitas"],
-                    victim_count,
-                    volunteer_count,
+                    posko["victim_count"],
+                    posko["volunteer_count"],
                     posko_id,
                 )
                 for column, value in enumerate(values):
@@ -186,9 +190,11 @@ class PoskoManagementPage(QWidget):
             self.table.resizeColumnsToContents()
             self.status_label.setText(f"{len(rows)} posko terdaftar.")
         except (sqlite3.Error, PermissionError) as exc:
+            self.table.setRowCount(0)
             self.status_label.setText(str(exc))
 
     def _selected_posko(self) -> sqlite3.Row | None:
+        self._require_admin()
         row = self.table.currentRow()
         if row < 0:
             QMessageBox.information(
@@ -199,18 +205,21 @@ class PoskoManagementPage(QWidget):
             return None
         posko_id = int(self.table.item(row, 5).text())
         return next(
-            (item for item in db.list_posko(self._conn) if int(item["id"]) == posko_id),
+            (item for item in secure_store.list_admin_posko(self._conn, self._user_id)
+             if int(item["id"]) == posko_id),
             None,
         )
 
     def add_posko(self) -> None:
         """Tambah posko baru dan tampilkan status singkat di footer."""
         try:
+            self._require_admin()
             dialog = PoskoFormDialog(parent=self)
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return
             values = dialog.values()
-            db.insert_posko(self._conn, values)
+            self._require_admin()
+            secure_store.add_posko(self._conn, self._user_id, values)
             self.status_label.setText(
                 f"Posko '{values['nama']}' berhasil ditambahkan."
             )
@@ -220,16 +229,18 @@ class PoskoManagementPage(QWidget):
 
     def edit_posko(self) -> None:
         """Ubah nama, lokasi, dan kapasitas posko yang terpilih."""
-        posko = self._selected_posko()
-        if posko is None:
-            return
         try:
+            posko = self._selected_posko()
+            if posko is None:
+                return
             dialog = PoskoFormDialog(posko=dict(posko), parent=self)
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return
             values = dialog.values()
-            db.update_posko(
+            self._require_admin()
+            secure_store.update_posko(
                 self._conn,
+                self._user_id,
                 int(posko["id"]),
                 {
                     "nama": values["nama"],
@@ -246,34 +257,27 @@ class PoskoManagementPage(QWidget):
 
     def delete_posko(self) -> None:
         """Hapus posko dengan konfirmasi kalau data masih terikat."""
-        posko = self._selected_posko()
-        if posko is None:
-            return
-        posko_id = int(posko["id"])
-        victim_count = self._conn.execute(
-            "SELECT COUNT(*) FROM victims WHERE posko_id = ?",
-            (posko_id,),
-        ).fetchone()[0]
-        volunteer_count = self._conn.execute(
-            "SELECT COUNT(*) FROM users WHERE posko_id = ? AND role = 'relawan'",
-            (posko_id,),
-        ).fetchone()[0]
-
-        if victim_count or volunteer_count:
-            answer = QMessageBox.question(
-                self,
-                "Konfirmasi hapus posko",
-                "Posko ini masih dipakai "
-                f"{victim_count} korban dan {volunteer_count} relawan, "
-                "melanjutkan akan membuat data mereka jadi 'Tidak ditentukan'. "
-                "Lanjutkan?",
-            )
-            if answer != QMessageBox.StandardButton.Yes:
-                return
-
         try:
+            posko = self._selected_posko()
+            if posko is None:
+                return
+            posko_id = int(posko["id"])
+            victim_count = posko["victim_count"]
+            volunteer_count = posko["volunteer_count"]
+            if victim_count or volunteer_count:
+                answer = QMessageBox.question(
+                    self,
+                    "Konfirmasi hapus posko",
+                    "Posko ini masih dipakai "
+                    f"{victim_count} korban dan {volunteer_count} relawan, "
+                    "melanjutkan akan membuat data mereka jadi 'Tidak ditentukan'. "
+                    "Lanjutkan?",
+                )
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+            self._require_admin()
+            secure_store.delete_posko(self._conn, self._user_id, posko_id)
             self._last_deleted_id = posko_id
-            db.delete_posko(self._conn, posko_id)
             self.status_label.setText(f"Posko '{posko['nama']}' berhasil dihapus.")
             self.refresh()
         except (PermissionError, sqlite3.Error) as exc:

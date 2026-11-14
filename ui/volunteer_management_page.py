@@ -413,5 +413,17 @@ class VolunteerManagementPage(QWidget):
         except (PermissionError, ValueError, sqlite3.Error) as exc:
             QMessageBox.critical(self, "Gagal menghapus relawan", str(exc))
 
+    def stop_face_capture(self) -> None:
+        """Batalkan pendaftaran yang terbuka sebelum halaman sesi dibuang."""
+        for dialog in self.findChildren(FaceEnrollmentDialog):
+            dialog.reject()
+        self._pending_volunteer = None
+
+    def clear_sensitive_state(self) -> None:
+        """Lepaskan data formulir dan profil setelah sesi berakhir."""
+        self.stop_face_capture()
+        self.table.setRowCount(0)
+
     def closeEvent(self, event) -> None:
+        self.stop_face_capture()
         super().closeEvent(event)

@@ -78,6 +78,7 @@ def authenticate(
         raise ValueError(_GENERIC_ERROR)
 
     # --- 3. Cek lockout ---
+    failed_attempts = row["failed_attempts"] or 0
     locked_until_str: Optional[str] = row["locked_until"]
     if locked_until_str:
         locked_until = datetime.fromisoformat(locked_until_str)
@@ -93,11 +94,13 @@ def authenticate(
             )
         # Lockout sudah lewat → reset otomatis
         db.update_user_login_attempt(conn, user_id, 0, None)
+        # Row SQLite tetap berisi nilai lama meskipun database sudah direset.
+        failed_attempts = 0
 
     # --- 4. Verifikasi password (Argon2) ---
     if not verify_password(password, row["password_hash"]):
         # Increment failed_attempts
-        new_attempts = (row["failed_attempts"] or 0) + 1
+        new_attempts = failed_attempts + 1
 
         if new_attempts >= config.MAX_LOGIN_ATTEMPTS:
             # Kunci akun

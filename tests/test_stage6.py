@@ -14,6 +14,7 @@ from auth import dongle, session, volunteers
 from database import db, secure_store
 from seed_demo import seed_demo_data
 from ui.main_window import MainWindow
+from ui.face_enrollment_dialog import FaceEnrollmentDialog
 
 
 @pytest.fixture(scope="session")
@@ -117,6 +118,62 @@ def test_dongle_timer_logs_out_and_removes_protected_pages(
     assert window.gate_status.text() == "Dongle dicabut, sesi diakhiri"
     window.close()
     qapp.processEvents()
+
+
+@pytest.mark.parametrize("reason", ["manual", "dongle_removed", "blocked", "close"])
+def test_end_session_after_opening_volunteers_cancels_enrollment(
+    admin_context, monkeypatch: pytest.MonkeyPatch, qapp, tmp_path: Path,
+    reason: str,
+) -> None:
+    """Semua jalur keluar tetap membersihkan halaman relawan dan dialog wajah."""
+    from types import SimpleNamespace
+
+    conn, admin_id, _volunteer_id = admin_context
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "stage6.db")
+    monkeypatch.setattr(dongle, "is_any_valid_dongle_present", lambda _conn: True)
+    monkeypatch.setattr(FaceEnrollmentDialog, "_start_camera", lambda _self: None)
+    window = MainWindow()
+    session.login(dict(db.get_user_by_id(conn, admin_id)), os.urandom(32))
+    window._show_dashboard(session.get_current_user())
+    window._open_page("volunteers")
+    page = window.volunteer_page
+    assert page is not None
+    page._pending_volunteer = {"password": "transient-test-password"}
+    dialog = FaceEnrollmentDialog("Relawan", parent=page)
+    calls: list[str] = []
+    dialog._camera_worker = SimpleNamespace(
+        requestInterruption=lambda: calls.append("interrupt"),
+        wait=lambda _timeout: calls.append("wait"),
+    )
+    dialog.rejected.connect(lambda: calls.append("rejected"))
+    dialog.show()
+    try:
+        if reason == "manual":
+            window._end_session("Logout manual")
+        elif reason == "close":
+            window.close()
+        else:
+            if reason == "blocked":
+                db.update_user_active(conn, admin_id, 0)
+            else:
+                def missing_dongle(_user) -> bytes:
+                    raise ValueError("dongle dicabut")
+                monkeypatch.setattr(dongle, "verify_dongle", missing_dongle)
+            window._check_dongle()
+        assert not session.is_logged_in()
+        assert window.volunteer_page is None
+        assert window.dashboard_page is None
+        assert page._pending_volunteer is None
+        assert page.table.rowCount() == 0
+        assert dialog._camera_worker is None
+        assert calls[:2] == ["interrupt", "wait"]
+        assert "rejected" in calls
+        assert not dialog.isVisible()
+        if reason != "close":
+            assert window.pages.currentWidget() in (window.gate_page, window.login_page)
+    finally:
+        window.close()
+        qapp.processEvents()
 
 
 def test_dashboard_exposes_role_based_navigation_buttons(

@@ -139,6 +139,22 @@ class TestLogin:
         result = auth_login.authenticate(conn, "frank", "mypass")
         assert result["username"] == "frank"
 
+    def test_expired_lockout_starts_a_new_three_attempt_window(self, conn):
+        """Salah pertama setelah lima menit tidak memakai hitungan sebelum lockout."""
+        uid = _make_user(conn, username="retry", password="correct-password")
+        past = (datetime.now() - timedelta(seconds=1)).isoformat()
+        db.update_user_login_attempt(conn, uid, config.MAX_LOGIN_ATTEMPTS, past)
+
+        for attempt in range(1, config.MAX_LOGIN_ATTEMPTS + 1):
+            with pytest.raises(ValueError, match="Username atau password salah"):
+                auth_login.authenticate(conn, "retry", "wrong-password")
+            row = db.get_user_by_id(conn, uid)
+            assert row["failed_attempts"] == attempt
+            assert bool(row["locked_until"]) == (attempt == config.MAX_LOGIN_ATTEMPTS)
+
+        with pytest.raises(ValueError, match="terkunci"):
+            auth_login.authenticate(conn, "retry", "correct-password")
+
     def test_success_resets_failed_attempts(self, conn):
         """Login sukses mereset failed_attempts ke 0."""
         _make_user(conn, username="grace", password="pass_g")

@@ -51,3 +51,6 @@ desktop.ini
 
 # Model files (ONNX models di models/ di-commit, jangan di-ignore)
 # Tapi jika ukurannya besar, bisa gunakan Git LFS atau unduh terpisah
+
+# Local agent skills
+/.codex/

@@ -64,11 +64,14 @@ def _bootstrap_admin(
     recovery_path: Path,
     drive: str,
 ) -> None:
-    """Buat akun, dongle, embedding dan recovery dalam satu transaksi DB."""
+    """Batalkan perubahan DB dan pulihkan file jika bootstrap gagal."""
     if recovery_path.exists():
         raise FileExistsError(f"File recovery sudah ada: {recovery_path}")
 
     recovery_write_started = False
+    token_write_started = False
+    token_path = dongle._token_path(drive)
+    previous_token: bytes | None = None
     try:
         # Kunci tulis dan cek ulang mencegah dua bootstrap berjalan bersamaan.
         conn.execute("BEGIN IMMEDIATE")
@@ -90,6 +93,9 @@ def _bootstrap_admin(
             commit=False,
         )
 
+        previous_token = token_path.read_bytes() if token_path.exists() else None
+        # Transaksi SQLite tidak membatalkan penulisan ke flashdisk.
+        token_write_started = True
         token = dongle.provision_dongle(conn, drive, user_id, commit=False)
         salt = os.urandom(16)
         wrapped_master_key = keys.wrap_master_key(
@@ -118,12 +124,18 @@ def _bootstrap_admin(
             conn, "ADMIN_BOOTSTRAP", user_id=user_id, commit=False
         )
         conn.commit()
-    except Exception:
+    except BaseException:
         if conn.in_transaction:
             conn.rollback()
-        # Do not leave a newly-created recovery file behind on a failed setup.
-        if recovery_write_started and recovery_path.exists():
-            recovery_path.unlink()
+        try:
+            if recovery_write_started and recovery_path.exists():
+                recovery_path.unlink()
+        finally:
+            if token_write_started:
+                if previous_token is None:
+                    token_path.unlink(missing_ok=True)
+                else:
+                    token_path.write_bytes(previous_token)
         raise
 
 

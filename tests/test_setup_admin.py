@@ -9,6 +9,61 @@ from database import db
 import setup_admin
 
 
+@pytest.mark.parametrize("existing_token", [False, True])
+@pytest.mark.parametrize("failure_at", ["provision", "wrap", "recovery", "log", "cancel"])
+def test_bootstrap_failure_restores_dongle_and_rolls_back(
+    setup_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    existing_token: bool, failure_at: str,
+) -> None:
+    """Rollback juga mencakup file di luar DB, termasuk penulisan parsial."""
+    token_path = tmp_path / ".saferelief_key"
+    original = b"previous-token-content\r\n"
+    if existing_token:
+        token_path.write_bytes(original)
+    recovery_path = tmp_path / "recovery.key"
+    monkeypatch.setattr(setup_admin.dongle, "_token_path", lambda _drive: token_path)
+    monkeypatch.setattr(setup_admin.dongle, "get_volume_serial", lambda _drive: "TEST")
+
+    def fail(*_args, **_kwargs) -> None:
+        raise OSError("simulated failure")
+
+    def fail_provision(*_args, **_kwargs) -> None:
+        token_path.write_bytes(b"partial-token")
+        fail()
+
+    def write_recovery(_master: bytes, _password: str, output: str) -> None:
+        Path(output).write_bytes(b"partial-recovery")
+        if failure_at == "recovery":
+            fail()
+        if failure_at == "cancel":
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(setup_admin.keys, "create_recovery_file", write_recovery)
+    if failure_at == "provision":
+        monkeypatch.setattr(setup_admin.dongle, "provision_dongle", fail_provision)
+    elif failure_at == "wrap":
+        monkeypatch.setattr(setup_admin.keys, "wrap_master_key", fail)
+    elif failure_at == "log":
+        monkeypatch.setattr(setup_admin.db, "log_activity", fail)
+
+    with db.get_connection(setup_db) as conn:
+        error = KeyboardInterrupt if failure_at == "cancel" else OSError
+        with pytest.raises(error):
+            setup_admin._bootstrap_admin(
+                conn, full_name="Admin", username="admin",
+                password="admin-password", recovery_password="recovery-password",
+                recovery_path=recovery_path, drive=str(tmp_path),
+            )
+        assert db.list_users(conn) == []
+        assert db.list_activity_log(conn) == []
+        assert not conn.in_transaction
+    assert not recovery_path.exists()
+    if existing_token:
+        assert token_path.read_bytes() == original
+    else:
+        assert not token_path.exists()
+
+
 @pytest.fixture
 def setup_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = tmp_path / "setup-test.db"

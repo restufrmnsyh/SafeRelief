@@ -224,6 +224,32 @@ def list_posko(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return db.list_posko(conn)
 
 
+def list_admin_posko(conn: sqlite3.Connection, user_id: int) -> list[sqlite3.Row]:
+    """Baca posko dan jumlah relasi hanya untuk admin yang masih aktif."""
+    require_active_user(conn, user_id, "admin")
+    return db.list_posko_with_counts(conn)
+
+
+def add_posko(conn: sqlite3.Connection, user_id: int, data: dict) -> int:
+    """Periksa status admin saat operasi, bukan hanya saat membuka halaman."""
+    require_active_user(conn, user_id, "admin")
+    return db.insert_posko(conn, data)
+
+
+def update_posko(
+    conn: sqlite3.Connection, user_id: int, posko_id: int, data: dict
+) -> None:
+    """Tolak perubahan posko jika admin sudah diblokir."""
+    require_active_user(conn, user_id, "admin")
+    db.update_posko(conn, posko_id, data)
+
+
+def delete_posko(conn: sqlite3.Connection, user_id: int, posko_id: int) -> None:
+    """Jaga izin penghapusan juga pada lapisan logika."""
+    require_active_user(conn, user_id, "admin")
+    db.delete_posko(conn, posko_id)
+
+
 def _decrypt_victim_row(row: sqlite3.Row, db_key: bytes) -> dict:
     """
     Konversi Row ke dict dengan kolom *_enc terdekripsi menjadi string.

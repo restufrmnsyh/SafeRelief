@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
 import config
 from auth import session
-from database import db
+from database import db, secure_store
 from ui.posko_management_page import PoskoFormDialog, PoskoManagementPage
 
 
@@ -129,4 +129,105 @@ def test_posko_page_rejects_relawan_access(posko_context, qapp):
     with pytest.raises(PermissionError, match="admin"):
         PoskoManagementPage(conn)
     session.logout()
+    qapp.processEvents()
+
+
+@pytest.mark.parametrize("operation", ["add_posko", "edit_posko", "delete_posko"])
+@pytest.mark.parametrize("state", ["blocked", "logged_out", "relawan"])
+def test_open_posko_page_rejects_lost_admin_access(
+    posko_context, monkeypatch: pytest.MonkeyPatch, qapp,
+    operation: str, state: str,
+) -> None:
+    """Izin halaman yang sudah terbuka harus mengikuti status sesi terkini."""
+    conn, admin_id, volunteer_id, _posko_id = posko_context
+    page = PoskoManagementPage(conn)
+    page.table.selectRow(0)
+    before = [dict(row) for row in db.list_posko(conn)]
+    if state == "blocked":
+        db.update_user_active(conn, admin_id, 0)
+    elif state == "logged_out":
+        session.logout()
+    else:
+        session.login(dict(db.get_user_by_id(conn, volunteer_id)), os.urandom(32))
+
+    errors: list[str] = []
+    monkeypatch.setattr(QMessageBox, "critical", lambda _p, _t, text: errors.append(text))
+    getattr(page, operation)()
+    assert errors
+    assert [dict(row) for row in db.list_posko(conn)] == before
+    page.refresh()
+    assert page.table.rowCount() == 0
+    page.deleteLater()
+    qapp.processEvents()
+
+
+@pytest.mark.parametrize("operation", ["add_posko", "edit_posko", "delete_posko"])
+def test_posko_rechecks_admin_after_dialog(
+    posko_context, monkeypatch: pytest.MonkeyPatch, qapp, operation: str,
+) -> None:
+    """Timer dapat berjalan ketika dialog modal terbuka; izin diperiksa lagi saat simpan."""
+    conn, admin_id, _volunteer_id, _posko_id = posko_context
+    page = PoskoManagementPage(conn)
+    page.table.selectRow(0)
+    before = [dict(row) for row in db.list_posko(conn)]
+
+    def accept_after_blocking(*_args, **_kwargs):
+        db.update_user_active(conn, admin_id, 0)
+        return (QMessageBox.StandardButton.Yes if operation == "delete_posko"
+                else QDialog.DialogCode.Accepted)
+
+    monkeypatch.setattr(PoskoFormDialog, "exec", accept_after_blocking)
+    monkeypatch.setattr(QMessageBox, "question", accept_after_blocking)
+    monkeypatch.setattr(PoskoFormDialog, "values", lambda _self: {
+        "nama": "Changed", "lokasi": "Changed", "kapasitas": 10,
+    })
+    errors: list[str] = []
+    monkeypatch.setattr(QMessageBox, "critical", lambda _p, _t, text: errors.append(text))
+    getattr(page, operation)()
+    assert errors
+    assert [dict(row) for row in db.list_posko(conn)] == before
+    page.deleteLater()
+    qapp.processEvents()
+
+
+@pytest.mark.parametrize("state", ["blocked", "relawan"])
+def test_posko_logic_rejects_unauthorized_writes(posko_context, state: str) -> None:
+    """Memanggil lapisan penyimpanan langsung tetap memerlukan admin aktif."""
+    conn, admin_id, volunteer_id, posko_id = posko_context
+    user_id = volunteer_id
+    if state == "blocked":
+        db.update_user_active(conn, admin_id, 0)
+        user_id = admin_id
+    data = {"nama": "Changed", "lokasi": "Changed", "kapasitas": 10}
+    before = [dict(row) for row in db.list_posko(conn)]
+    with pytest.raises(PermissionError):
+        secure_store.add_posko(conn, user_id, data)
+    with pytest.raises(PermissionError):
+        secure_store.update_posko(conn, user_id, posko_id, data)
+    with pytest.raises(PermissionError):
+        secure_store.delete_posko(conn, user_id, posko_id)
+    with pytest.raises(PermissionError):
+        secure_store.list_admin_posko(conn, user_id)
+    assert [dict(row) for row in db.list_posko(conn)] == before
+
+
+def test_posko_counts_and_delete_confirmation_preserve_relations(
+    posko_context, monkeypatch: pytest.MonkeyPatch, qapp,
+) -> None:
+    """Pembatalan hapus menjaga korban/relawan; konfirmasi hanya melepas poskonya."""
+    conn, _admin_id, _volunteer_id, posko_id = posko_context
+    page = PoskoManagementPage(conn)
+    assert page.table.item(0, 3).text() == "1"
+    assert page.table.item(0, 4).text() == "1"
+    page.table.selectRow(0)
+    monkeypatch.setattr(QMessageBox, "question", lambda *_a, **_k: QMessageBox.StandardButton.No)
+    page.delete_posko()
+    assert db.get_posko_by_id(conn, posko_id) is not None
+    assert db.get_victim_by_kode(conn, "K-1001")["posko_id"] == posko_id
+    monkeypatch.setattr(QMessageBox, "question", lambda *_a, **_k: QMessageBox.StandardButton.Yes)
+    page.delete_posko()
+    assert db.get_posko_by_id(conn, posko_id) is None
+    assert db.get_victim_by_kode(conn, "K-1001")["posko_id"] is None
+    assert db.get_user_by_username(conn, "relawan_terikat")["posko_id"] is None
+    page.deleteLater()
     qapp.processEvents()
