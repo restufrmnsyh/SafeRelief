@@ -3,7 +3,7 @@
 import sqlite3
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QLabel, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QDialog, QLabel, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
 
 from auth import dongle
 from database import db
@@ -138,6 +138,12 @@ class MainWindow(QMainWindow):
         from auth import session
 
         self._clear_session_with_log(reason)
+        app = QApplication.instance()
+        if app is not None:
+            # Reject membatalkan formulir dan menghentikan kamera sebelum induknya dibuang.
+            for widget in app.topLevelWidgets():
+                if isinstance(widget, QDialog) and widget.isVisible():
+                    widget.reject()
         self._discard_authenticated_pages()
         self._logout_notice = message
         self.login_page.set_gate_status("Mencari dongle...")

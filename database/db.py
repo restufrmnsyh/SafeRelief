@@ -256,6 +256,32 @@ def update_user_credentials(
         conn.commit()
 
 
+def update_admin_recovery_credentials(
+    conn: sqlite3.Connection,
+    user_id: int,
+    password_hash: str,
+    wrapped_master_key: bytes,
+    kdf_salt: bytes,
+    *,
+    commit: bool = True,
+) -> None:
+    """Perbarui kredensial admin yang sudah ada setelah verifikasi pemulihan."""
+    # Password hasil pemulihan harus bisa dipakai tanpa lockout password lama.
+    cur = conn.execute(
+        """
+        UPDATE users
+        SET password_hash = ?, wrapped_master_key = ?, kdf_salt = ?,
+            failed_attempts = 0, locked_until = NULL
+        WHERE id = ? AND role = 'admin'
+        """,
+        (password_hash, wrapped_master_key, kdf_salt, user_id),
+    )
+    if cur.rowcount != 1:
+        raise ValueError("Admin yang akan dipulihkan tidak ditemukan.")
+    if commit:
+        conn.commit()
+
+
 def list_users(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """Kembalikan semua user (tanpa kolom BLOB sensitif)."""
     cur = conn.execute(

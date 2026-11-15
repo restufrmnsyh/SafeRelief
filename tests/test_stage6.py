@@ -7,7 +7,8 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
+from PySide6.QtCore import QThread
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QPushButton
 
 import config
 from auth import dongle, session, volunteers
@@ -15,6 +16,8 @@ from database import db, secure_store
 from seed_demo import seed_demo_data
 from ui.main_window import MainWindow
 from ui.face_enrollment_dialog import FaceEnrollmentDialog
+from ui.victims_page import VictimDetailDialog
+from ui.volunteer_management_page import DongleChangeDialog, VolunteerFormDialog
 
 
 @pytest.fixture(scope="session")
@@ -179,6 +182,140 @@ def test_end_session_after_opening_volunteers_cancels_enrollment(
         if reason != "close":
             assert window.pages.currentWidget() in (window.gate_page, window.login_page)
     finally:
+        window.close()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("reason", ["manual", "dongle_removed", "blocked"])
+def test_end_session_rejects_all_visible_dialogs_before_discarding_pages(
+    admin_context, monkeypatch: pytest.MonkeyPatch, qapp, tmp_path: Path, reason: str,
+) -> None:
+    """Formulir dan popup mengambang harus batal sebelum induknya dihapus."""
+    conn, admin_id, _volunteer_id = admin_context
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "stage6.db")
+    monkeypatch.setattr(dongle, "is_any_valid_dongle_present", lambda _conn: True)
+    monkeypatch.setattr(dongle, "verify_dongle", lambda _user: bytes(32))
+    window = MainWindow()
+    session.login(dict(db.get_user_by_id(conn, admin_id)), os.urandom(32))
+    window._show_dashboard(session.get_current_user())
+    window._open_page("victims")
+    page = window.victims_page
+    detail = VictimDetailDialog({}, {"nik": b"ciphertext", "kondisi_medis": b"ciphertext"}, page)
+    detail.show_plaintext({"nik": "NIK-UJI", "kondisi_medis": "Data medis uji"})
+    page._detail_dialog = detail
+    detail.finished.connect(page._reset_detail_dialog)
+    form = VolunteerFormDialog([], ["Z:\\"], parent=window)
+    replacement = DongleChangeDialog(["Z:\\"], parent=form)
+    confirmation = QMessageBox(
+        QMessageBox.Icon.Question, "Konfirmasi", "Simpan perubahan?",
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, window,
+    )
+    confirmation.setDefaultButton(QMessageBox.StandardButton.Yes)
+    dialogs = [detail, form, replacement, confirmation]
+    hidden = QDialog(window)
+    accepted, rejected, hidden_rejected = [], [], []
+    hidden.rejected.connect(lambda: hidden_rejected.append(True))
+    for dialog in dialogs:
+        dialog.accepted.connect(lambda: accepted.append(True))
+        dialog.rejected.connect(lambda: rejected.append(True))
+        dialog.setModal(True)
+        dialog.show()
+    discard = window._discard_authenticated_pages
+
+    def discard_after_dialogs_are_rejected() -> None:
+        assert all(not dialog.isVisible() for dialog in dialogs)
+        assert not session.is_logged_in()
+        discard()
+
+    monkeypatch.setattr(window, "_discard_authenticated_pages", discard_after_dialogs_are_rejected)
+    try:
+        qapp.processEvents()
+        assert all(dialog.isVisible() for dialog in dialogs)
+        assert detail._table.item(0, 2).text() == "NIK-UJI"
+        if reason == "manual":
+            window._end_session("Logout manual")
+        else:
+            if reason == "blocked":
+                db.update_user_active(conn, admin_id, 0)
+            else:
+                monkeypatch.setattr(dongle, "is_any_valid_dongle_present", lambda _conn: False)
+
+                def missing_dongle(_user) -> bytes:
+                    raise ValueError("Dongle dicabut")
+
+                monkeypatch.setattr(dongle, "verify_dongle", missing_dongle)
+            window._check_dongle()
+        assert all(not dialog.isVisible() for dialog in dialogs)
+        assert all(dialog.result() == QDialog.DialogCode.Rejected for dialog in dialogs)
+        assert accepted == []
+        assert len(rejected) == len(dialogs)
+        assert hidden_rejected == []
+        assert detail._table.item(0, 2).text() == "(terenkripsi)"
+        assert window.dashboard_page is None
+        assert window.victims_page is None
+        assert not session.is_logged_in()
+        assert window.pages.currentWidget() in (window.gate_page, window.login_page)
+    finally:
+        for dialog in dialogs:
+            dialog.reject()
+        hidden.reject()
+        window.close()
+        qapp.processEvents()
+
+
+def test_forced_enrollment_rejection_stops_running_camera_before_discard(
+    admin_context, monkeypatch: pytest.MonkeyPatch, qapp, tmp_path: Path,
+) -> None:
+    """Reject global harus menjalankan stop kamera meski dialog tidak dimiliki halaman relawan."""
+    from PySide6.QtTest import QTest
+
+    class CameraUntilCancelled(QThread):
+        """Simulasikan thread kamera aktif tanpa membuka perangkat fisik."""
+
+        def run(self) -> None:
+            while not self.isInterruptionRequested():
+                self.msleep(5)
+
+    conn, admin_id, _volunteer_id = admin_context
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "stage6.db")
+    monkeypatch.setattr(dongle, "is_any_valid_dongle_present", lambda _conn: True)
+    monkeypatch.setattr(dongle, "verify_dongle", lambda _user: bytes(32))
+    monkeypatch.setattr(FaceEnrollmentDialog, "_start_camera", lambda _self: None)
+    window = MainWindow()
+    session.login(dict(db.get_user_by_id(conn, admin_id)), os.urandom(32))
+    window._show_dashboard(session.get_current_user())
+    dialog = FaceEnrollmentDialog("Relawan Uji", parent=window)
+    camera = CameraUntilCancelled(dialog)
+    dialog._camera_worker = camera
+    camera.start()
+    dialog.setModal(True)
+    dialog.show()
+    rejected = []
+    dialog.rejected.connect(lambda: rejected.append(camera.isRunning()))
+    discard = window._discard_authenticated_pages
+
+    def discard_after_camera_stops() -> None:
+        assert not dialog.isVisible()
+        assert dialog._camera_worker is None
+        assert camera.isFinished()
+        discard()
+
+    monkeypatch.setattr(window, "_discard_authenticated_pages", discard_after_camera_stops)
+    try:
+        QTest.qWait(20)
+        assert camera.isRunning()
+        assert dialog.isVisible()
+        window._end_session("Dongle dicabut, sesi diakhiri", "dongle_removed")
+        assert not dialog.isVisible()
+        assert dialog.result() == QDialog.DialogCode.Rejected
+        assert rejected == [False]
+        assert not camera.isRunning()
+        assert dialog.capture_result is None
+        assert not session.is_logged_in()
+    finally:
+        camera.requestInterruption()
+        camera.wait(2000)
+        dialog.reject()
         window.close()
         qapp.processEvents()
 
