@@ -1,4 +1,4 @@
-"""Halaman login tiga faktor dengan tampilan Web App Full White Screen terpusat."""
+"""Halaman login tiga faktor dengan form akun dan pratinjau wajah terpusat."""
 
 import sqlite3
 from collections import deque
@@ -7,13 +7,15 @@ import cv2
 import numpy as np
 from cryptography.exceptions import InvalidTag
 from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage, QKeySequence, QPixmap, QResizeEvent, QShortcut
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QFrame,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -23,6 +25,7 @@ from auth import dongle, face_auth, login, session
 from crypto import keys
 from database import db, secure_store
 from ui.face_capture_worker import FaceCaptureWorker, MODEL_LOCK
+from ui.login_style import LOGIN_STYLE
 
 
 class CameraWorker(QThread):
@@ -121,206 +124,130 @@ class LoginPage(QWidget):
         self._registration_mode = False
         self._capture_worker: FaceCaptureWorker | None = None
 
-        # Latar berbasis soft blue agar lebih konsisten dengan desain aplikasi.
-        self.setStyleSheet(
-            "QWidget#loginPage { background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #edf5fb, stop:1 #f7fbff); color: #1E2A39; }"
-            "QLabel { color: #1E2A39; }"
-        )
-
-        # Layout Utama: layar terpusat dengan ruang breathing room.
+        self.setStyleSheet(LOGIN_STYLE)
         root_layout = QVBoxLayout(self)
-        root_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        root_layout.setContentsMargins(48, 40, 48, 40)
-        root_layout.setSpacing(18)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        self.scroll = QScrollArea()
+        self.scroll.setObjectName("loginScroll")
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        root_layout.addWidget(self.scroll)
+        canvas = QWidget()
+        canvas.setObjectName("loginCanvas")
+        self.canvas_layout = QVBoxLayout(canvas)
+        self.canvas_layout.setContentsMargins(24, 24, 24, 24)
+        self.scroll.setWidget(canvas)
 
-        # Container Card dengan latar soft glass.
         self.card_frame = QFrame()
-        self.card_frame.setStyleSheet(
-            "QFrame#mainLoginCard {"
-            "   background: rgba(255,255,255,0.78);"
-            "   border: 1px solid #dfeaf5;"
-            "   border-radius: 26px;"
-            "}"
-        )
         self.card_frame.setObjectName("mainLoginCard")
-
-        card_layout = QVBoxLayout(self.card_frame)
-        card_layout.setContentsMargins(36, 32, 36, 32)
-        card_layout.setSpacing(20)
-        card_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        # Header Title (Tepat di Tengah Atas)
-        title_label = QLabel("SafeRelief")
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title_label.setStyleSheet(
-            "font-size: 30px; font-weight: 800; color: #1e2a39; border: none; letter-spacing: 0.5px;"
-        )
-
-        # Status Dongle (Di Tengah Atas Form)
-        self.gate_label = QLabel("✖ Mencari dongle...")
-        self.gate_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.set_gate_status("Mencari dongle...")
-
-        card_layout.addWidget(title_label, alignment=Qt.AlignmentFlag.AlignCenter)
-        card_layout.addWidget(self.gate_label, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        # Grid Content Horizontal (Kiri: Form, Kanan: Kamera)
-        content_layout = QHBoxLayout()
-        content_layout.setSpacing(40)
-        content_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        # ==========================================
-        # BAGIAN KIRI: FORM USERNAME & PASSWORD
-        # ==========================================
-        left_box = QVBoxLayout()
-        left_box.setSpacing(10)
-        left_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        input_qss = (
-            "QLineEdit {"
-            "   background-color: #F8FAFC;"
-            "   border: 1px solid #CBD5E1;"
-            "   border-radius: 8px;"
-            "   padding: 10px 14px;"
-            "   font-size: 13px;"
-            "   color: #0F172A;"
-            "}"
-            "QLineEdit:focus {"
-            "   background-color: #EFF6FF;"
-            "   border: 2px solid #3B82F6;"
-            "}"
-        )
-
-        lbl_user = QLabel("Username")
-        lbl_user.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_user.setStyleSheet("font-size: 12px; font-weight: 600; color: #475569; border: none;")
+        self.card_frame.setMaximumWidth(860)
+        self.card_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.work_layout = QVBoxLayout(self.card_frame)
+        self.work_layout.setContentsMargins(32, 32, 32, 32)
+        self.work_layout.setSpacing(12)
+        self.work_layout.addWidget(self._label("Masuk ke SafeRelief", "loginTitle"))
+        self.work_layout.addWidget(self._label(
+            "Gunakan akun yang terhubung dengan dongle Anda.", "loginDescription"
+        ))
+        self.gate_label = self._label("Mencari dongle...", "loginGateStatus")
+        self.work_layout.addWidget(self.gate_label)
+        self.work_layout.addSpacing(12)
+        self.content_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self.content_layout.setSpacing(24)
+        self.account_panel = QFrame()
+        self.account_panel.setObjectName("loginAccount")
+        account_layout = QVBoxLayout(self.account_panel)
+        account_layout.setContentsMargins(0, 0, 0, 0)
+        account_layout.setSpacing(8)
+        account_layout.addWidget(self._label("Identitas akun", "loginSectionTitle"))
+        account_layout.addSpacing(8)
         self.username_input = QLineEdit()
-        self.username_input.setFixedWidth(270)
-        self.username_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.username_input.setPlaceholderText("Masukkan username")
-        self.username_input.setStyleSheet(input_qss)
-
-        lbl_pass = QLabel("Password")
-        lbl_pass.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_pass.setStyleSheet("font-size: 12px; font-weight: 600; color: #475569; border: none;")
         self.password_input = QLineEdit()
-        self.password_input.setFixedWidth(270)
-        self.password_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.password_input.setPlaceholderText("Masukkan password")
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password_input.setStyleSheet(input_qss)
-
-        self.submit_button = QPushButton("Cek Kredensial & Aktifkan Kamera")
-        self.submit_button.setFixedWidth(270)
-        self.submit_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.submit_button.setStyleSheet(
-            "QPushButton {"
-            "   background-color: #DBEAFE;"
-            "   color: #1E40AF;"
-            "   border: 1px solid #BFDBFE;"
-            "   border-radius: 8px;"
-            "   padding: 10px;"
-            "   font-weight: 700;"
-            "   font-size: 12px;"
-            "   margin-top: 6px;"
-            "}"
-            "QPushButton:hover {"
-            "   background-color: #BFDBFE;"
-            "   color: #1E3A8A;"
-            "}"
-            "QPushButton:disabled {"
-            "   background-color: #F1F5F9;"
-            "   color: #94A3B8;"
-            "   border-color: #E2E8F0;"
-            "}"
-        )
+        for caption, field in (("Username", self.username_input), ("Password", self.password_input)):
+            label = self._label(caption, "loginFieldLabel")
+            label.setBuddy(field)
+            field.setAccessibleName(caption)
+            field.setMinimumWidth(0)
+            account_layout.addWidget(label)
+            account_layout.addWidget(field)
+            account_layout.addSpacing(8)
+        self.submit_button = self._action("Periksa akun")
         self.submit_button.clicked.connect(self.submit_credentials)
+        self.username_input.returnPressed.connect(self.password_input.setFocus)
+        self.password_input.returnPressed.connect(self.submit_button.click)
+        account_layout.addWidget(self.submit_button)
+        account_layout.addWidget(self._label(
+            "Kamera aktif setelah akun diperiksa.", "loginCameraHint"
+        ))
+        account_layout.addStretch(1)
 
-        left_box.addWidget(lbl_user, alignment=Qt.AlignmentFlag.AlignCenter)
-        left_box.addWidget(self.username_input, alignment=Qt.AlignmentFlag.AlignCenter)
-        left_box.addWidget(lbl_pass, alignment=Qt.AlignmentFlag.AlignCenter)
-        left_box.addWidget(self.password_input, alignment=Qt.AlignmentFlag.AlignCenter)
-        left_box.addWidget(self.submit_button, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        # ==========================================
-        # BAGIAN KANAN: KAMERA & VERIFIKASI WAJAH
-        # ==========================================
-        right_box = QVBoxLayout()
-        right_box.setSpacing(10)
-        right_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.camera_label = QLabel("Isi form & klik 'Lanjutkan'")
+        self.face_panel = QFrame()
+        self.face_panel.setObjectName("loginFace")
+        face_layout = QVBoxLayout(self.face_panel)
+        face_layout.setContentsMargins(0, 0, 0, 0)
+        face_layout.setSpacing(8)
+        self.face_title = self._label("Verifikasi wajah", "loginSectionTitle")
+        face_layout.addWidget(self.face_title)
+        face_layout.addSpacing(8)
+        self.camera_label = self._label("", "loginCamera")
         self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.camera_label.setFixedSize(280, 190)
-        self.camera_label.setStyleSheet(
-            "border: 2px dashed #CBD5E1; border-radius: 12px; background-color: #F8FAFC; color: #64748B; font-size: 12px;"
-        )
-
-        self.verify_face_button = QPushButton("Verifikasi Wajah")
-        self.verify_face_button.setFixedWidth(240)
-        self.verify_face_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.verify_face_button.setStyleSheet(
-            "QPushButton {"
-            "   background-color: #DBEAFE;"
-            "   color: #1E40AF;"
-            "   border: 1px solid #BFDBFE;"
-            "   border-radius: 8px;"
-            "   padding: 9px;"
-            "   font-weight: 700;"
-            "   font-size: 12px;"
-            "}"
-            "QPushButton:hover {"
-            "   background-color: #BFDBFE;"
-            "}"
-            "QPushButton:disabled {"
-            "   background-color: #F1F5F9;"
-            "   color: #94A3B8;"
-            "   border-color: #E2E8F0;"
-            "}"
-        )
-        self.verify_face_button.setEnabled(False)
+        self.camera_label.setMinimumHeight(176)
+        # Abaikan lebar pixmap agar frame kamera tidak memperlebar form saat jendela diperkecil.
+        self.camera_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.camera_label.setAccessibleName("Pratinjau kamera untuk verifikasi wajah")
+        face_layout.addWidget(self.camera_label)
+        self.verify_face_button = self._action("Verifikasi Wajah")
         self.verify_face_button.clicked.connect(self.verify_current_face)
+        face_layout.addWidget(self.verify_face_button)
+        self.camera_hint = self._label("Posisikan wajah di tengah kamera.", "loginCameraHint")
+        face_layout.addWidget(self.camera_hint)
+        face_layout.addStretch(1)
+        self.content_layout.addWidget(self.account_panel, 1)
+        self.content_layout.addWidget(self.face_panel, 1)
+        self.work_layout.addLayout(self.content_layout)
+        self.message_label = self._label("", "loginMessage")
+        self.message_label.setMinimumHeight(40)
+        self.message_label.setAccessibleName("Status autentikasi")
+        self.work_layout.addWidget(self.message_label)
+        self.canvas_layout.addStretch(1)
+        self.canvas_layout.addWidget(self.card_frame, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.canvas_layout.addStretch(1)
+        self.set_gate_status("Mencari dongle...")
+        self._set_face_controls_visible(False)
+        QWidget.setTabOrder(self.username_input, self.password_input)
+        QWidget.setTabOrder(self.password_input, self.submit_button)
+        QWidget.setTabOrder(self.submit_button, self.verify_face_button)
 
-        self.message_label = QLabel("")
-        self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
-        self.message_label.setWordWrap(True)
-        self.message_label.setFixedWidth(270)
-        self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    @staticmethod
+    def _label(text: str, name: str) -> QLabel:
+        """Bungkus teks agar tetap terbaca pada jendela sempit."""
+        label = QLabel(text)
+        label.setObjectName(name)
+        label.setWordWrap(True)
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        return label
 
-        right_box.addWidget(self.camera_label, alignment=Qt.AlignmentFlag.AlignCenter)
-        right_box.addWidget(self.verify_face_button, alignment=Qt.AlignmentFlag.AlignCenter)
-        right_box.addWidget(self.message_label, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        content_layout.addLayout(left_box)
-        content_layout.addLayout(right_box)
-
-        card_layout.addLayout(content_layout)
-        root_layout.addWidget(self.card_frame)
+    @staticmethod
+    def _action(text: str) -> QPushButton:
+        """Gunakan kontrol native dengan dukungan Enter dan Space."""
+        button = QPushButton(text)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        shortcut = QShortcut(QKeySequence(Qt.Key.Key_Return), button)
+        shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
+        shortcut.activated.connect(button.click)
+        return button
 
     def set_gate_status(self, message: str) -> None:
         was_open = self._gate_open
         self._gate_open = message == "Dongle valid terdeteksi"
 
-        if self._gate_open:
-            self.gate_label.setText("✔ Dongle Valid Terdeteksi")
-            self.gate_label.setStyleSheet(
-                "color: #16A34A; "
-                "background-color: transparent; "
-                "border: 1.5px solid #22C55E; "
-                "border-radius: 8px; "
-                "padding: 5px 14px; "
-                "font-weight: 700; font-size: 11px;"
-            )
-        else:
-            self.gate_label.setText("✖ Mencari dongle...")
-            self.gate_label.setStyleSheet(
-                "color: #DC2626; "
-                "background-color: transparent; "
-                "border: 1.5px solid #EF4444; "
-                "border-radius: 8px; "
-                "padding: 5px 14px; "
-                "font-weight: 700; font-size: 11px;"
-            )
+        self.gate_label.setText("Dongle valid terdeteksi" if self._gate_open else message)
+        self.gate_label.setProperty("valid", self._gate_open)
+        self.gate_label.style().unpolish(self.gate_label)
+        self.gate_label.style().polish(self.gate_label)
 
         if was_open and not self._gate_open:
             self._clear_pre_auth()
@@ -330,19 +257,25 @@ class LoginPage(QWidget):
         self.username_input.clear()
         self.password_input.clear()
         self.set_gate_status("Dongle valid terdeteksi")
-        self.message_label.setText(message)
+        self._set_message(message)
+
+    def _set_message(self, text: str, tone: str = "error") -> None:
+        """Pertahankan ukuran dan kontras pesan pada semua hasil autentikasi."""
+        color = {"error": "#983A32", "success": "#216345", "info": "#4F50D9"}[tone]
+        self.message_label.setStyleSheet(f"color: {color}; font-size: 13px; border: none;")
+        self.message_label.setText(text)
 
     def submit_credentials(self) -> None:
         self._clear_pre_auth()
         self.message_label.clear()
         if not self._gate_open:
-            self.message_label.setText("Dongle valid belum terdeteksi.")
+            self._set_message("Dongle valid belum terdeteksi.")
             return
 
         username = self.username_input.text().strip()
         password = self.password_input.text()
         if not username or not password:
-            self.message_label.setText("Username dan password wajib diisi.")
+            self._set_message("Username dan password wajib diisi.")
             return
 
         self.submit_button.setEnabled(False)
@@ -376,29 +309,19 @@ class LoginPage(QWidget):
             if encoding_bytes is None:
                 self._registration_mode = True
                 self._set_face_controls_visible(True)
-                self.message_label.setStyleSheet(
-                    "color: #0F766E; font-size: 11px; font-weight: 600; border: none;"
-                )
-                self.message_label.setText(
-                    "Wajah belum terdaftar. Posisikan wajah di kamera lalu klik 'Daftarkan Wajah'."
+                self._set_message(
+                    "Wajah belum terdaftar. Posisikan wajah di kamera lalu klik 'Daftarkan Wajah'.",
+                    "info",
                 )
                 return
 
             self._registration_mode = False
             self._stored_encoding = face_auth.bytes_to_encoding(encoding_bytes)
             self._set_face_controls_visible(True)
-            self.message_label.setStyleSheet(
-                "color: #059669; font-size: 11px; font-weight: 600; border: none;"
-            )
-            self.message_label.setText(
-                "Kredensial valid. Tatap kamera & verifikasi."
-            )
+            self._set_message("Kredensial valid. Tatap kamera dan verifikasi.", "success")
         except (ValueError, OSError, sqlite3.Error, InvalidTag) as exc:
             self._clear_pre_auth()
-            self.message_label.setStyleSheet(
-                "color: #DC2626; font-size: 11px; font-weight: 600; border: none;"
-            )
-            self.message_label.setText(str(exc))
+            self._set_message(str(exc))
         finally:
             if master_key is not None:
                 master_key[:] = b"\x00" * len(master_key)
@@ -430,7 +353,7 @@ class LoginPage(QWidget):
         self._last_frame = frame
         self._recent_frames.append(frame.copy())
         pixmap = QPixmap.fromImage(image).scaled(
-            self.camera_label.size(),
+            self.camera_label.contentsRect().size(),
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
@@ -451,27 +374,36 @@ class LoginPage(QWidget):
 
     def _camera_failed(self, message: str) -> None:
         self.camera_label.setText(message)
-        self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
-        self.message_label.setText(message)
+        self._set_message(message)
         self.verify_face_button.setEnabled(False)
 
-    def resizeEvent(self, event) -> None:
-        pixmap = self.camera_label.pixmap()
-        if pixmap is not None:
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        """Susun ulang konten, lalu sesuaikan preview tanpa memotong frame."""
+        super().resizeEvent(event)
+        columns = self.width() >= 680
+        margin = 24 if columns else 16
+        self.canvas_layout.setContentsMargins(margin, margin, margin, margin)
+        # Sisakan jalur scrollbar supaya form panjang tidak memicu gulir horizontal.
+        self.card_frame.setFixedWidth(min(860, max(240, self.width() - margin * 2 - 12)))
+        self.content_layout.setDirection(
+            QBoxLayout.Direction.LeftToRight if columns else QBoxLayout.Direction.TopToBottom
+        )
+        self.work_layout.setContentsMargins(32 if columns else 24, 28, 32 if columns else 24, 24)
+        if self._last_frame is not None:
+            rgb = cv2.cvtColor(self._last_frame, cv2.COLOR_BGR2RGB)
+            image = QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0], QImage.Format.Format_RGB888)
             self.camera_label.setPixmap(
-                pixmap.scaled(
-                    self.camera_label.size(),
+                QPixmap.fromImage(image).scaled(
+                    self.camera_label.contentsRect().size(),
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
             )
-        super().resizeEvent(event)
 
     def register_current_face(self) -> None:
         """Daftarkan wajah pengguna dari feed kamera aktif tanpa membuka webcam baru."""
         if not self._gate_open or self._preauth_user is None:
-            self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
-            self.message_label.setText("Sesi pendaftaran wajah belum siap.")
+            self._set_message("Sesi pendaftaran wajah belum siap.")
             return
 
         if self._capture_worker is not None:
@@ -480,14 +412,14 @@ class LoginPage(QWidget):
         if not frames and self._last_frame is not None:
             frames = [self._last_frame]
         if not frames:
-            self.message_label.setText("Tunggu sampai frame webcam tersedia.")
+            self._set_message("Tunggu sampai frame webcam tersedia.")
             return
         worker = FaceCaptureWorker(frames)
         self._capture_worker = worker
         worker.completed.connect(self._registration_finished)
         worker.finished.connect(self._capture_finished)
         self.verify_face_button.setEnabled(False)
-        self.message_label.setText("Merekam wajah...")
+        self._set_message("Merekam wajah...", "info")
         worker.start()
 
     def _capture_finished(self) -> None:
@@ -502,15 +434,14 @@ class LoginPage(QWidget):
         if self.sender() is not self._capture_worker or not self._gate_open:
             return
         if error:
-            self.message_label.setText(error)
+            self._set_message(error)
             return
 
         user = self._preauth_user
         master_key = self._transient_master_key
         db_key = self._preauth_db_key
         if user is None or master_key is None or db_key is None:
-            self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
-            self.message_label.setText("Sesi pendaftaran wajah sudah kedaluwarsa.")
+            self._set_message("Sesi pendaftaran wajah sudah kedaluwarsa.")
             self._clear_pre_auth()
             return
 
@@ -526,20 +457,17 @@ class LoginPage(QWidget):
             self._stored_encoding = average_encoding
             self._registration_mode = False
             self._set_face_controls_visible(True)
-            self.message_label.setStyleSheet("color: #059669; font-size: 11px; font-weight: 600; border: none;")
-            self.message_label.setText("Wajah berhasil didaftarkan.")
+            self._set_message("Wajah berhasil didaftarkan.", "success")
             db.log_activity(self._conn, "LOGIN_SUCCESS", user_id=int(user["id"]))
             session.login(user, bytes(master_key))
             self._clear_pre_auth()
             self.authenticated.emit(user)
         except (ValueError, OSError, sqlite3.Error, cv2.error) as exc:
-            self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
-            self.message_label.setText(str(exc))
+            self._set_message(str(exc))
 
     def verify_current_face(self) -> None:
         if not self._gate_open:
-            self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
-            self.message_label.setText("Tunggu sampai frame webcam tersedia.")
+            self._set_message("Tunggu sampai frame webcam tersedia.")
             return
 
         if self._registration_mode:
@@ -547,8 +475,7 @@ class LoginPage(QWidget):
             return
 
         if self._stored_encoding is None or self._last_frame is None:
-            self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
-            self.message_label.setText("Tunggu sampai frame webcam tersedia.")
+            self._set_message("Tunggu sampai frame webcam tersedia.")
             return
         if self._face_worker is not None and self._face_worker.isRunning():
             return
@@ -560,8 +487,7 @@ class LoginPage(QWidget):
         worker.finished.connect(self._face_worker_finished)
         self._face_worker = worker
         self.verify_face_button.setEnabled(False)
-        self.message_label.setStyleSheet("color: #2563EB; font-size: 11px; font-weight: 600; border: none;")
-        self.message_label.setText("Memverifikasi wajah...")
+        self._set_message("Memverifikasi wajah...", "info")
         worker.start()
 
     def _face_verification_finished(
@@ -571,16 +497,14 @@ class LoginPage(QWidget):
                 or not self._gate_open):
             return
         if error:
-            self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
-            self.message_label.setText(error)
+            self._set_message(error)
             self.verify_face_button.setEnabled(True)
             return
         if not matched:
-            self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
             if score == 0.0:
-                self.message_label.setText("Wajah tidak terdeteksi. Coba lagi.")
+                self._set_message("Wajah tidak terdeteksi. Coba lagi.")
             else:
-                self.message_label.setText(
+                self._set_message(
                     f"Wajah tidak cocok (skor {score:.3f})."
                 )
             self.verify_face_button.setEnabled(True)
@@ -589,8 +513,7 @@ class LoginPage(QWidget):
         user = self._preauth_user
         master_key = self._transient_master_key
         if user is None or master_key is None:
-            self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
-            self.message_label.setText("Sesi autentikasi sudah kedaluwarsa.")
+            self._set_message("Sesi autentikasi sudah kedaluwarsa.")
             self._clear_pre_auth()
             return
 
@@ -601,8 +524,7 @@ class LoginPage(QWidget):
             dongle.verify_dongle(current_user)
             db.log_activity(self._conn, "LOGIN_SUCCESS", user_id=int(user["id"]))
         except (OSError, ValueError, sqlite3.Error, PermissionError) as exc:
-            self.message_label.setStyleSheet("color: #DC2626; font-size: 11px; font-weight: 600; border: none;")
-            self.message_label.setText(str(exc))
+            self._set_message(str(exc))
             self._clear_pre_auth()
             return
 
@@ -618,17 +540,25 @@ class LoginPage(QWidget):
             self.verify_face_button.setEnabled(True)
 
     def _set_face_controls_visible(self, visible: bool) -> None:
-        # Kamera tetap terlihat di UI agar tata letak tidak bergeser/kosong sebelah
+        """Perbarui petunjuk kamera tanpa mengubah keputusan autentikasi."""
         if not visible:
-            self.camera_label.setText("Isi form & klik 'Lanjutkan'")
+            self.camera_label.clear()
+            self.camera_label.setText("Kamera belum aktif\n\nPeriksa akun untuk membuka kamera.")
+            self.face_title.setText("Verifikasi wajah")
+            self.camera_hint.setText("Posisikan wajah di tengah kamera.")
             self.verify_face_button.setText("Verifikasi Wajah")
             self.verify_face_button.setEnabled(False)
             return
 
+        self.camera_label.setText("Membuka kamera...")
         if self._registration_mode:
             self.verify_face_button.setText("Daftarkan Wajah")
+            self.face_title.setText("Pendaftaran wajah")
+            self.camera_hint.setText("Login pertama: daftarkan wajah Anda.")
         else:
             self.verify_face_button.setText("Verifikasi Wajah")
+            self.face_title.setText("Verifikasi wajah")
+            self.camera_hint.setText("Tatap kamera, lalu verifikasi wajah.")
         self.verify_face_button.setEnabled(True)
 
     def _clear_pre_auth(self) -> None:

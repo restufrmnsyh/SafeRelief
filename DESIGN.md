@@ -1,7 +1,7 @@
 # Arah visual dashboard SafeRelief
 
 Referensi: gambar dashboard Hireism yang diberikan pengguna pada 14 November 2026.
-Lingkup: dashboard PySide6 dan, atas permintaan lanjutan pengguna, seluruh sembilan halaman menu beserta dialognya. Alur autentikasi dan fungsi halaman memakai implementasi yang ada.
+Lingkup: dashboard PySide6, sembilan halaman menu beserta dialognya, dan tampilan login sesuai permintaan lanjutan pengguna. Alur autentikasi dan fungsi halaman memakai implementasi yang ada.
 
 Reading this as: dashboard koordinasi untuk admin dan relawan bencana, dengan sidebar putih dan ruang kerja lavender, dial ENERGY 2 / RHYTHM 2 / MOTION 1.
 
@@ -40,3 +40,13 @@ Reading this as: dashboard koordinasi untuk admin dan relawan bencana, dengan si
 - Formulir memakai selector `formDialog` yang terpisah dari dashboard, dengan latar putih opaque, judul 22 px, keterangan singkat, dan tinggi yang mengikuti jumlah field agar formulir pendek tidak menyisakan ruang berlebihan.
 
 Arah ini menjadi acuan halaman berikutnya setelah dashboard disetujui pengguna.
+
+## Penerapan pada login
+
+Reading this as: login desktop untuk admin dan relawan bencana, dengan form putih terpusat dan aksen tombol indigo, dial ENERGY 2 / RHYTHM 2 / MOTION 1.
+
+- Sesuai koreksi pengguna, panel identitas indigo beserta tagline dan daftar tahapan dihapus; bidang putih berlebar maksimal 860 px memusatkan perhatian pada login.
+- Dua area akun dan wajah membedakan tindakan yang bisa dilakukan sekarang dengan langkah setelah password diperiksa; status dongle tidak menampilkan identitas pemilik.
+- Label kiri dan tombol Periksa akun memperjelas tugas, sementara preview kamera memiliki petunjuk sebelum webcam aktif.
+- Di bawah 680 px akun dan kamera ditumpuk. Gulir vertikal menjaga seluruh kontrol dapat dijangkau.
+- Permukaan opaque, input minimal 44 px, fokus 2 px, dan pesan status yang membungkus menjaga keterbacaan pada tema Windows yang berbeda.
