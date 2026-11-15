@@ -5,6 +5,7 @@ import sys
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
+import config
 from database import db
 from ui.main_window import MainWindow
 from ui.popup_theme import install_popup_theme
@@ -158,10 +159,11 @@ def _apply_light_theme(app: QApplication) -> None:
 
 
 def main() -> int:
-    """Inisialisasi database dan jalankan event loop aplikasi."""
+    """Siapkan direktori dan database, lalu jalankan event loop aplikasi."""
     app = QApplication(sys.argv)
     _apply_light_theme(app)
     app.setApplicationName("SafeRelief")
+    config.ensure_directories()
     db.init_db()
     window = MainWindow()
     window.show()

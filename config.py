@@ -128,14 +128,14 @@ HKDF_LABEL_STEGO = b"stego"
 HKDF_LABEL_VIGENERE = b"vigenere"
 
 
-def ensure_directories():
+def ensure_directories() -> None:
     """
     Pastikan direktori yang diperlukan ada.
     Dipanggil saat aplikasi start atau setup.
     """
-    DATA_DIR.mkdir(exist_ok=True)
-    STORAGE_DIR.mkdir(exist_ok=True)
-    MODELS_DIR.mkdir(exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 if __name__ == "__main__":
