@@ -29,7 +29,8 @@ from PySide6.QtWidgets import (
 import config
 from auth import session
 from crypto import aes_module, stego_lsb
-from database import secure_store
+from database import db, secure_store
+from ui.photo_metadata import PhotoMetadataPanel
 
 
 class PhotoEmbedWorker(QThread):
@@ -136,8 +137,7 @@ class PhotoPage(QWidget):
         self.decrypt_button.setVisible(self._role == "admin")
         self.delete_button = QPushButton("Hapus")
         self.delete_button.clicked.connect(self.delete_selected_photo)
-        self.metadata_view = QLabel("Metadata terenkripsi tampil di sini.")
-        self.metadata_view.setWordWrap(True)
+        self.metadata_view = PhotoMetadataPanel()
         self.image_view = QLabel("Preview foto akan tampil setelah decrypt.")
         self.image_view.setMinimumHeight(220)
         self.image_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -172,10 +172,10 @@ class PhotoPage(QWidget):
         layout.addLayout(actions)
         layout.addWidget(QLabel("Preview foto"))
         layout.addWidget(self.image_view)
-        layout.addWidget(QLabel("Metadata terverifikasi"))
+        layout.addWidget(QLabel("Metadata foto"))
         layout.addWidget(self.metadata_view)
         layout.addWidget(self.status_label)
-        self.table.itemSelectionChanged.connect(self._refresh_selected_photo_preview)
+        self.table.itemSelectionChanged.connect(self._selected_photo_changed)
         self.refresh()
 
     def _confirm_logout(self) -> None:
@@ -365,6 +365,11 @@ class PhotoPage(QWidget):
             for column, value in enumerate(values):
                 self.table.setItem(row, column, QTableWidgetItem(str(value)))
         self.table.resizeColumnsToContents()
+        self._selected_photo_changed()
+
+    def _selected_photo_changed(self) -> None:
+        """Metadata yang dibuka hanya berlaku untuk foto yang sedang dipilih."""
+        self.metadata_view.show_empty()
         self._refresh_selected_photo_preview()
 
     def _refresh_selected_photo_preview(self) -> None:
@@ -454,19 +459,14 @@ class PhotoPage(QWidget):
             encrypted_payload = stego_lsb.extract(str(image_path))
             if not encrypted_payload:
                 raise ValueError("Payload stego kosong.")
-            self.metadata_view.setText(
-                json.dumps({
-                    "encrypted_payload": encrypted_payload.hex(),
-                    "status": "terenkripsi",
-                    "message": "Klik Decrypt untuk membuka metadata asli.",
-                }, ensure_ascii=False, indent=2)
-            )
+            self.metadata_view.show_encrypted(encrypted_payload)
             self._preview_unlocked_by_row[photo_id] = False
             self.image_view.clear()
             self.image_view.setText("Preview foto akan tampil setelah decrypt.")
             self.status_label.setText("Metadata foto masih terenkripsi. Klik Decrypt untuk melihat isi aslinya.")
         except (OSError, ValueError) as exc:
             message = f"Foto rusak atau payload tidak valid: {exc}"
+            self.metadata_view.show_error(message)
             self.status_label.setText(message)
             QMessageBox.warning(self, "Ekstrak gagal", message)
 
@@ -488,19 +488,44 @@ class PhotoPage(QWidget):
                 session.get_derived_key(config.HKDF_LABEL_STEGO),
             )
             metadata = json.loads(raw_payload.decode("utf-8"))
+            if not isinstance(metadata, dict):
+                raise ValueError("Payload metadata harus berupa rincian foto.")
             if metadata.get("original_sha256") != photo["original_hash"]:
                 raise ValueError("Hash foto tidak cocok dengan catatan database.")
         except (InvalidTag, OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
             message = f"Foto rusak, diubah, atau metadata tidak valid: {exc}"
+            self.metadata_view.show_error(message)
             self.status_label.setText(message)
             QMessageBox.warning(self, "Decrypt gagal", message)
             return
-        self.metadata_view.setText(
-            json.dumps(metadata, ensure_ascii=False, indent=2)
-        )
+        self.metadata_view.show_verified(metadata, self._metadata_references(metadata))
         self._preview_unlocked_by_row[photo_id] = True
         self._refresh_selected_photo_preview()
         self.status_label.setText("Metadata dan foto berhasil didecrypt dan diverifikasi.")
+
+    def _metadata_references(self, metadata: dict) -> dict[str, str]:
+        """Nama membantu pembacaan; ID payload tetap ditampilkan sebagai rujukan."""
+        references = {}
+        for key, caption in (("victim_id", "Korban"), ("posko_id", "Posko"), ("officer_id", "Petugas")):
+            identifier = metadata.get(key)
+            if identifier is None:
+                continue
+            name = ""
+            if isinstance(identifier, int):
+                if key == "victim_id":
+                    victim = next((row for row in secure_store.list_victims(self._conn) if row["id"] == identifier), None)
+                    if victim is not None:
+                        name = " · ".join(str(value) for value in (victim["kode_korban"], victim["nama_panggilan"]) if value)
+                elif key == "posko_id":
+                    post = next((row for row in secure_store.list_posko(self._conn) if row["id"] == identifier), None)
+                    if post is not None:
+                        name = str(post["nama"])
+                else:
+                    user = db.get_user_by_id(self._conn, identifier)
+                    if user is not None:
+                        name = str(user["nama_lengkap"] or user["username"])
+            references[key] = f"{name} (ID {identifier})" if name else f"{caption} ID {identifier}"
+        return references
 
     @staticmethod
     def _stored_image_path(filename: str) -> Path:

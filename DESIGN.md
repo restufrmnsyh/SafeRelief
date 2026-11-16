@@ -30,8 +30,10 @@ Reading this as: dashboard koordinasi untuk admin dan relawan bencana, dengan si
 - Kolom utama tabel mengisi sisa ruang; kolom bertombol menyediakan tambahan ruang untuk padding agar Decrypt/Unduh tidak terpotong.
 - Tabel lebar seperti blockchain dapat digulir di dalam panelnya; seluruh halaman tetap mengikuti lebar viewport.
 - Dokumentasi foto memisahkan daftar dan preview, sehingga pilihan foto dan metadata dapat ditinjau bersamaan.
+- Metadata foto memakai rincian berlabel, nama referensi beserta ID payload, waktu dengan zona asal, dan hash yang dapat dipilih. Status terenkripsi/terverifikasi/error dibedakan dengan teks; nilai kosong ditulis Tidak dicantumkan, bukan JSON/null.
 - Bantuan memisahkan formulir pencatatan dari riwayat pada jendela lebar; pada jendela sempit keduanya ditumpuk.
 - Chat membatasi tinggi panel baca dan mempertahankan scrollbar internal agar area kirim tetap mudah dijangkau.
+- Chat menempatkan tombol Decrypt langsung di bawah ciphertext; kunci otomatis dari sesi membuat input kunci manual tidak diperlukan pada alur koordinasi.
 - Ciphertext memakai Consolas untuk memudahkan pembacaan karakter; judul dan teks operasional tetap Segoe UI.
 - Formulir dialog memakai bidang putih, judul tegas, serta tombol Simpan/Batal di luar area gulir agar tetap dapat dijangkau.
 - Tidak menambahkan ilustrasi, foto profil, angka contoh pada data organisasi, atau mekanisme autentikasi baru.

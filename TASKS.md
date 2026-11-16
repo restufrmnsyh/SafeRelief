@@ -53,7 +53,7 @@ Satu halaman per sesi. UI hanya memanggil `secure_store`/`auth`, tanpa SQL.
 - [x] 5.2 Login (form + kamera di `QThread`)
 - [x] 5.3 Dashboard (menu menyesuaikan peran)
 - [x] 5.4 Data korban (tabel, cari, filter, tambah/edit/detail)
-- [x] 5.5 Chat (ciphertext di inbox, tombol Decrypt satu klik dengan kunci Vigenère otomatis, kotak opsional "kunci Vigenère manual" untuk demo)
+- [x] 5.5 Chat (ciphertext di inbox, tombol Decrypt satu klik dengan kunci Vigenère otomatis tanpa input kunci manual)
 - [x] 5.6 Dokumentasi foto (sisipkan dan ekstrak)
 - [x] 5.7 Berkas laporan (unggah, daftar, dekripsi/unduh)
 - [x] 5.8 Distribusi bantuan (catat, riwayat, Validasi Chain, Simulasi Tampering)

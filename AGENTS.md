@@ -116,7 +116,7 @@ Kunci turunan dihitung di memori, tidak pernah ditulis ke disk atau database. Di
 - Format blob: `[nonce 16][ciphertext][HMAC 32]`. Ciphertext sama panjang dengan plaintext; panjang asli pesan terlihat. Batas plaintext 8160 byte per pesan (maksimum output HKDF-SHA256 = `255 * 32`).
 - Dekripsi: verifikasi HMAC dengan `hmac.compare_digest` SEBELUM derivasi keystream dan XOR balik, lalu Vigenère.
 - **Kunci Vigenère otomatis** (diturunkan dari master key, label `b"vigenere"`). Pengguna tidak mengetik kunci: Decrypt cukup satu klik.
-- **Mode demo:** di panel chat ada kotak opsional "Gunakan kunci Vigenère manual". Normalnya kosong (pakai kunci otomatis). Jika diisi, kunci manual dipakai untuk dekripsi, sehingga kunci salah menghasilkan teks acak (bukan error) untuk keperluan demo.
+- **Dekripsi chat:** selalu memakai kunci Vigenère otomatis dari sesi. Sesuai keputusan pengguna, panel chat tidak menyediakan input kunci manual untuk demo.
 - Inbox menampilkan ciphertext (base64/hex) dulu; teks asli muncul setelah Decrypt.
 - Vigenère bekerja pada karakter ASCII 32-126 (modulus 95). Karakter lain dibiarkan.
 

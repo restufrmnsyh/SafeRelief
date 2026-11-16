@@ -1,6 +1,25 @@
 """Tambahan tema bersama untuk tabel, formulir, dan dialog ruang kerja."""
 
-WORKSPACE_STYLE = """
+PHOTO_METADATA_STYLE = """
+QFrame#photoMetadataPanel, QWidget#dashboardPage QFrame#photoMetadataPanel {
+    background: #F6F5FC; border: 1px solid #D9DCE9; border-radius: 12px;
+}
+QFrame#photoMetadataPanel QFrame { background: transparent; border: none; }
+QFrame#photoMetadataPanel QLabel { background: transparent; border: none; }
+QFrame#photoMetadataPanel QLabel#photoMetadataState { color: #20243C; font-size: 14px; font-weight: 600; }
+QFrame#photoMetadataPanel QLabel#photoMetadataState[tone="success"] { color: #216345; }
+QFrame#photoMetadataPanel QLabel#photoMetadataState[tone="error"] { color: #983A32; }
+QFrame#photoMetadataPanel QLabel#photoMetadataCaption,
+QFrame#photoMetadataPanel QLabel#photoMetadataDescription { color: #62677F; font-size: 12px; }
+QFrame#photoMetadataPanel QLabel#photoMetadataValue { color: #20243C; font-size: 14px; }
+QFrame#photoMetadataPanel QPlainTextEdit#photoMetadataCiphertext,
+QFrame#photoMetadataPanel QPlainTextEdit#photoMetadataHash {
+    background: #FFFFFF; color: #20243C; border: 1px solid #747A92;
+    border-radius: 8px; font-family: Consolas; font-size: 12px;
+}
+"""
+
+WORKSPACE_STYLE = PHOTO_METADATA_STYLE + """
 QWidget#dashboardPage QFrame#workspaceCard { background: #FFFFFF; border-radius: 16px; }
 QWidget#dashboardPage QFrame#workspaceSidebar { background: #FFFFFF; }
 QWidget#dashboardPage QLabel#workspaceTitle { font-size: 26px; font-weight: 700; }

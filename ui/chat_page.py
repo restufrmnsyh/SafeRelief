@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -66,10 +65,6 @@ class ChatPage(QWidget):
         self.ciphertext_view.setPlaceholderText(
             "Ciphertext pesan terpilih akan tampil di sini."
         )
-        self.manual_key_input = QLineEdit()
-        self.manual_key_input.setPlaceholderText(
-            "Gunakan kunci Vigenère manual (opsional untuk demo)"
-        )
         self.decrypt_button = QPushButton("Decrypt")
         self.decrypt_button.clicked.connect(self.decrypt_selected)
         self.plaintext_view = QPlainTextEdit()
@@ -94,7 +89,6 @@ class ChatPage(QWidget):
         message_detail = QVBoxLayout()
         message_detail.addWidget(QLabel("Ciphertext (base64)"))
         message_detail.addWidget(self.ciphertext_view)
-        message_detail.addWidget(self.manual_key_input)
         message_detail.addWidget(self.decrypt_button)
         message_detail.addWidget(QLabel("Plaintext"))
         message_detail.addWidget(self.plaintext_view)
@@ -249,7 +243,7 @@ class ChatPage(QWidget):
         self.status_label.setText("Pesan terenkripsi berhasil dikirim.")
 
     def decrypt_selected(self) -> None:
-        """Dekripsi hanya setelah permintaan eksplisit; kunci manual untuk demo."""
+        """Dekripsi setelah permintaan eksplisit dengan kunci otomatis dari sesi."""
         if not self._authorized():
             return
         item = self.inbox.currentItem()
@@ -259,11 +253,9 @@ class ChatPage(QWidget):
         message_id = int(item.data(Qt.ItemDataRole.UserRole))
         message = self._messages[message_id]
         try:
-            manual_key = self.manual_key_input.text()
-            vigenere_key = manual_key or session.get_vigenere_key()
             plaintext = super_encrypt.decrypt(
                 bytes(message["ciphertext"]),
-                vigenere_key,
+                session.get_vigenere_key(),
                 session.get_derived_key(config.HKDF_LABEL_CHAT_ENC),
                 session.get_derived_key(config.HKDF_LABEL_CHAT_MAC),
             )
@@ -285,4 +277,3 @@ class ChatPage(QWidget):
         self.ciphertext_view.clear()
         self.plaintext_view.clear()
         self.message_input.clear()
-        self.manual_key_input.clear()

@@ -100,10 +100,7 @@ def test_chat_sends_ciphertext_and_decrypts_only_on_request(media_context, qapp)
     assert b"Koordinasi di posko." not in ciphertext
     page.inbox.setCurrentRow(0)
     assert page.ciphertext_view.toPlainText()
-    page.manual_key_input.setText("kunci-manual-salah")
-    page.decrypt_button.click()
-    assert page.plaintext_view.toPlainText() != "Koordinasi di posko."
-    page.manual_key_input.clear()
+    assert page.plaintext_view.toPlainText() == ""
     page.decrypt_button.click()
     assert page.plaintext_view.toPlainText() == "Koordinasi di posko."
 
@@ -170,16 +167,25 @@ def test_photo_page_embeds_encrypted_metadata_and_admin_extracts(
     admin_page = PhotoPage(conn)
     admin_page.table.selectRow(0)
     admin_page.extract_selected()
-    encrypted = admin_page.metadata_view.text()
-    assert '"victim_id":' not in encrypted
-    assert '"original_sha256":' not in encrypted
+    metadata = admin_page.metadata_view
+    assert metadata.state_label.text() == "Metadata terenkripsi"
+    assert metadata.payload_view.toPlainText()
+    assert metadata.details.isHidden()
+    assert all(value.text() == "" for value in metadata.values.values())
     assert admin_page.image_view.text() != ""
     admin_page.decrypt_selected()
-    extracted = admin_page.metadata_view.text()
-    assert '"victim_id":' in extracted
-    assert '"original_sha256":' in extracted
+    assert metadata.state_label.text() == "Metadata terverifikasi"
+    assert "Ayu" in metadata.values["victim_id"].text()
+    assert "Posko A" in metadata.values["posko_id"].text()
+    assert "Relawan" in metadata.values["officer_id"].text()
+    assert metadata.values["keterangan"].text() == "Kondisi posko"
+    assert metadata.hash_view.toPlainText() == photo_row["original_hash"]
+    assert metadata.payload_view.toPlainText() == ""
     assert admin_page.image_view.pixmap() is not None
     assert not admin_page.image_view.pixmap().isNull()
+    admin_page.clear_sensitive_state()
+    assert all(value.text() == "" for value in metadata.values.values())
+    assert metadata.hash_view.toPlainText() == ""
     page.deleteLater()
     admin_page.deleteLater()
     qapp.processEvents()
@@ -261,6 +267,8 @@ def test_photo_preview_unlocks_per_row_only(media_context, tmp_path: Path, qapp)
     assert not admin_page.image_view.pixmap().isNull()
 
     admin_page.table.selectRow(1)
+    assert admin_page.metadata_view.details.isHidden()
+    assert all(value.text() == "" for value in admin_page.metadata_view.values.values())
     assert admin_page.image_view.text() == "Preview foto akan tampil setelah decrypt."
     assert admin_page.image_view.pixmap() is None or admin_page.image_view.pixmap().isNull()
 

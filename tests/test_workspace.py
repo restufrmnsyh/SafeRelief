@@ -7,7 +7,7 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QMessageBox
 
 import config
 from app import _apply_light_theme
@@ -198,6 +198,8 @@ def test_wrapped_chat_encrypts_before_displaying_plaintext(workspace_context, wo
     for method in ("warning", "critical", "information"):
         monkeypatch.setattr(QMessageBox, method, lambda _p, _t, message: dialogs.append(message))
     try:
+        assert page.findChildren(QLineEdit) == []
+        assert not any("Kunci Vigenère manual" in label.text() for label in page.findChildren(QLabel))
         page.message_input.setPlainText(text)
         QTest.mouseClick(page.send_button, Qt.MouseButton.LeftButton)
         assert dialogs == []

@@ -137,7 +137,7 @@ def _arrange_sections(owner: QWidget, current: str, layout: QVBoxLayout) -> None
     owner.image_view.setMinimumWidth(0)
     owner.image_view.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
     preview.addWidget(owner.image_view, 1)
-    preview.addWidget(label("Metadata terverifikasi", "sectionTitle"))
+    preview.addWidget(label("Metadata foto", "sectionTitle"))
     preview.addWidget(owner.metadata_view)
     columns.addLayout(gallery, 2)
     columns.addLayout(preview, 1)
@@ -253,7 +253,6 @@ class FeatureWorkspace(QWidget):
             owner.image_view.setObjectName("photoPreview")
         for attribute, caption in {
             "search_input": "Cari korban", "status_filter": "Status korban",
-            "manual_key_input": "Kunci Vigenère manual (opsional)",
             "message_input": "Pesan koordinasi", "record_type": "Jenis data",
             "record_input": "Catatan yang dibandingkan",
         }.items():
