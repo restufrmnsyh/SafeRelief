@@ -319,6 +319,9 @@ class FeatureWorkspace(QWidget):
             self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
             self.table.horizontalHeader().setMinimumSectionSize(84)
             self.table.horizontalHeader().setSectionResizeMode(stretch_column, QHeaderView.ResizeMode.Stretch)
+            if current == "victims" and self.user["role"] == "admin":
+                # Kedua kolom Base64 berbagi ruang di samping tombol Decrypt.
+                self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
             old_layout.insertWidget(0, self.count_label)
             old_layout.insertWidget(1, self.empty_label)
             self.table.model().rowsInserted.connect(self._update_count)

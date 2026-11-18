@@ -1,5 +1,6 @@
 """Tes bingkai menu bersama dan dialog tanpa kamera atau dongle fisik."""
 
+import base64
 import os
 from pathlib import Path
 
@@ -161,8 +162,8 @@ def test_dialog_theme_preserves_validation_and_password_masking(
 
 
 def test_wrapped_victims_keeps_explicit_decryption(workspace_context, workspace_app) -> None:
-    """Perubahan visual tidak membuka kolom sebelum pengguna menekan Decrypt."""
-    _conn, users, master = workspace_context
+    """Bandingkan kedua sel Base64 dengan BLOB asli sebelum membuka ringkasan."""
+    conn, users, master = workspace_context
     window = MainWindow()
     session.login(users["admin"], master)
     window._show_dashboard(session.get_current_user())
@@ -172,11 +173,27 @@ def test_wrapped_victims_keeps_explicit_decryption(workspace_context, workspace_
     workspace_app.processEvents()
     page = window.victims_page
     try:
-        assert page.table.item(0, 0).text() == "[terenkripsi]"
-        decrypt = page.table.cellWidget(0, 5)
+        record = db.get_victim_by_kode(conn, "UJI-001")
+        for column, field in enumerate(("nama_lengkap_enc", "nik_enc")):
+            item = page.table.item(0, column)
+            assert base64.b64decode(item.text(), validate=True) == record[field]
+            assert item.toolTip() == item.text()
+        assert page.table.isColumnHidden(2)
+        assert page.table.item(0, 2).text() == ""
+        assert db.list_activity_log(conn) == []
+        decrypt = page.table.cellWidget(0, page.table.columnCount() - 1)
         QTest.mouseClick(decrypt, Qt.MouseButton.LeftButton)
-        assert page.table.item(0, 0).text() == "UJI-001"
+        assert page.table.item(0, 0).text() == "Nama Sensitif Uji"
+        assert page.table.item(0, 1).text() == "NIK-UJI"
+        assert not page.table.isColumnHidden(2)
+        assert "Kode: UJI-001" in page.table.item(0, 2).text()
         assert page.edit_button.isEnabled()
+        assert page.table.currentRow() == 0
+        QTest.mouseClick(page.table.cellWidget(0, page.table.columnCount() - 1), Qt.MouseButton.LeftButton)
+        assert page._detail_dialog.isVisible()
+        assert page._detail_dialog._summary.isVisible()
+        assert [row["aksi"] for row in db.list_activity_log(conn)] == ["VICTIM_DECRYPTED"]
+        page._detail_dialog.reject()
     finally:
         window.close()
         workspace_app.processEvents()

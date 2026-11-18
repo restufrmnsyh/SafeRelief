@@ -464,6 +464,17 @@ def list_victims_plaintext(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return cur.fetchall()
 
 
+def list_victims_with_encrypted_identity(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Ambil ringkasan dan kedua BLOB yang ditampilkan di tabel admin dalam satu kueri."""
+    return conn.execute(
+        """
+        SELECT id, kode_korban, nama_panggilan, usia, status, posko_id,
+               created_by, nama_lengkap_enc, nik_enc
+        FROM victims ORDER BY id
+        """
+    ).fetchall()
+
+
 def get_victim_summary(conn: sqlite3.Connection) -> dict[str, object]:
     """Ambil jumlah korban per status dan per posko untuk dashboard."""
     status_rows = conn.execute(

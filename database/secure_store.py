@@ -214,6 +214,12 @@ def list_victims(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return db.list_victims_plaintext(conn)
 
 
+def list_admin_victims(conn: sqlite3.Connection, user_id: int) -> list[sqlite3.Row]:
+    """Tampilkan ciphertext asli kepada admin aktif tanpa membuka satu pun korban."""
+    require_active_user(conn, user_id, "admin")
+    return db.list_victims_with_encrypted_identity(conn)
+
+
 def get_dashboard_summary(conn: sqlite3.Connection) -> dict[str, object]:
     """Ambil ringkasan dashboard lewat lapisan penyimpanan aplikasi."""
     return db.get_victim_summary(conn)

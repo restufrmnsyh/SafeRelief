@@ -1,5 +1,9 @@
+"""Tes perilaku halaman korban untuk sesi admin dan relawan."""
+
+import base64
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -95,6 +99,41 @@ def victims_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, qapp):
     conn.close()
 
 
+def test_clearing_current_victim_disables_edit_without_dialog(victims_context) -> None:
+    conn, _, volunteer_id, _, _, master_key, _ = victims_context
+    session.login(
+        {"id": volunteer_id, "username": "relawan_korban", "role": "relawan"},
+        master_key,
+    )
+    page = VictimsPage(conn)
+    page.table.selectRow(0)
+    assert page.edit_button.isEnabled()
+
+    with patch("ui.victims_page.QMessageBox") as message_box:
+        page.table.setCurrentCell(-1, -1)
+        assert page.table.currentRow() == -1
+        assert not page.edit_button.isEnabled()
+        assert message_box.mock_calls == []
+
+
+@pytest.mark.parametrize("button_name", ["edit_button", "detail_button", "delete_button"])
+def test_victim_action_without_selection_prompts_once(victims_context, button_name: str) -> None:
+    conn, admin_id, _, _, _, master_key, _ = victims_context
+    session.login(
+        {"id": admin_id, "username": "admin_korban", "role": "admin"},
+        master_key,
+    )
+    page = VictimsPage(conn)
+    assert page.table.currentRow() == -1
+    button = getattr(page, button_name)
+    if button is page.edit_button:
+        # Qt mengabaikan click() saat Edit nonaktif. Aktifkan untuk menguji handler.
+        button.setEnabled(True)
+    with patch.object(QMessageBox, "information") as information:
+        button.click()
+        information.assert_called_once_with(page, "Data Korban", "Pilih korban terlebih dahulu.")
+
+
 def test_admin_detail_shows_ciphertext_and_hides_plaintext_until_decrypt(
     victims_context, monkeypatch: pytest.MonkeyPatch, qapp
 ):
@@ -117,6 +156,7 @@ def test_admin_detail_shows_ciphertext_and_hides_plaintext_until_decrypt(
     page.show_detail()
     dialog = page._detail_dialog
     assert dialog is not None
+    assert dialog._summary.isHidden()
     row = next(
         i for i in range(dialog._table.rowCount())
         if dialog._table.item(i, 0).text() == "nik"
@@ -149,6 +189,7 @@ def test_admin_decrypt_populates_plaintext_and_logs_only_decrypt_event(
     assert dialog is not None
 
     page._decrypt_victim(victim_id)
+    assert not dialog._summary.isHidden()
     row = next(
         i for i in range(dialog._table.rowCount())
         if dialog._table.item(i, 0).text() == "nik"
@@ -224,6 +265,9 @@ def test_admin_detail_handles_null_sensitive_fields_and_wrong_db_key(
         if page._detail_dialog._table.item(i, 0).text() == "nik"
     )
     assert page._detail_dialog._table.item(row, 2).text() == "(terenkripsi)"
+    assert page._detail_dialog._summary.isHidden()
+    assert page.table.isColumnHidden(2)
+    assert page.table.item(1, 2).text() == ""
 
     page.clear_sensitive_state()
     page.deleteLater()
@@ -235,11 +279,15 @@ def test_get_victim_ciphertext_and_decrypt_victim_reject_relawan_and_inactive(
 ):
     conn, admin_id, volunteer_id, _posko_id, victim_id, _master_key, db_key = victims_context
     with pytest.raises(PermissionError):
+        secure_store.list_admin_victims(conn, volunteer_id)
+    with pytest.raises(PermissionError):
         secure_store.get_victim_ciphertext(conn, volunteer_id, victim_id)
     with pytest.raises(PermissionError):
         secure_store.decrypt_victim(conn, db_key, volunteer_id, victim_id)
 
     db.update_user_active(conn, admin_id, 0)
+    with pytest.raises(PermissionError):
+        secure_store.list_admin_victims(conn, admin_id)
     with pytest.raises(PermissionError):
         secure_store.get_victim_ciphertext(conn, admin_id, victim_id)
     with pytest.raises(PermissionError):
@@ -262,7 +310,36 @@ def test_clear_sensitive_state_closes_dialog_and_clears_plaintext(victims_contex
     page.clear_sensitive_state()
     assert page._detail_dialog is None
     assert page.table.rowCount() == 0
+    assert page._decrypted_victim == {}
     qapp.processEvents()
+
+
+def test_admin_decrypt_reveals_only_one_row_and_refresh_restores_ciphertext(victims_context) -> None:
+    conn, admin_id, _, _, first_id, master_key, db_key = victims_context
+    session.login({"id": admin_id, "username": "admin_korban", "role": "admin"}, master_key)
+    second_id = secure_store.add_victim(conn, db_key, {"kode_korban": "K-002", "nik": "NIK kedua"})
+    page = VictimsPage(conn)
+    action = page.table.columnCount() - 1
+    original_name = page.table.item(0, 0).text()
+    assert page.table.item(1, 0).text() == "-"
+
+    page.table.cellWidget(0, action).click()
+    assert page.table.item(1, 2).text() == ""
+    page.search_input.setText("K-002")
+    assert page.table.isColumnHidden(2)
+    page.table.cellWidget(0, action).click()
+    assert page.table.item(0, 1).text() == "NIK kedua"
+    page.search_input.clear()
+    assert page.table.item(0, 0).text() == original_name
+    assert page.table.item(0, 2).text() == ""
+    assert page.table.item(1, 2).text().startswith("Kode: K-002")
+    assert len(db.list_activity_log(conn)) == 2
+
+    secure_store.update_victim(conn, db_key, second_id, {"nik": "NIK baru"})
+    page.refresh()
+    assert page.table.isColumnHidden(2)
+    assert base64.b64decode(page.table.item(1, 1).text()) == db.get_victim_by_id(conn, second_id)["nik_enc"]
+    assert base64.b64decode(original_name) == db.get_victim_by_id(conn, first_id)["nama_lengkap_enc"]
 
 
 def test_decrypt_state_survives_detail_dialog_close_for_edit_access(victims_context, qapp):
