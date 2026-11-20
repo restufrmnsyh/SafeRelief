@@ -318,7 +318,7 @@ class LoginPage(QWidget):
         self._last_frame = frame
         if self._capture_worker is not None:
             self._capture_worker.submit_frame(frame, captured_at)
-        self.camera_label.setPixmap(camera_preview(image, self.camera_label.contentsRect().size(), self._capture_worker))
+        self.camera_label.setPixmap(camera_preview(image, self.camera_label.contentsRect().size()))
 
     @staticmethod
     def _qimage_to_bgr(image: QImage) -> np.ndarray:
@@ -357,7 +357,7 @@ class LoginPage(QWidget):
             rgb = cv2.cvtColor(self._last_frame, cv2.COLOR_BGR2RGB)
             image = QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0], QImage.Format.Format_RGB888)
             self.camera_label.setPixmap(
-                camera_preview(image, self.camera_label.contentsRect().size(), self._capture_worker)
+                camera_preview(image, self.camera_label.contentsRect().size())
             )
 
     def verify_current_face(self) -> None:
@@ -376,17 +376,11 @@ class LoginPage(QWidget):
             return
         worker = FaceCaptureWorker(self._stored_encoding)
         self._capture_worker = worker
-        worker.instruction.connect(self._show_face_instruction)
         worker.completed.connect(self._face_check_completed)
         worker.finished.connect(self._capture_finished)
         self.verify_face_button.setEnabled(False)
-        self._set_message("Memulai pemeriksaan wajah...", "info")
+        self._set_message("Memeriksa wajah. Tetap tatap kamera sebentar.", "info")
         worker.start()
-
-    def _show_face_instruction(self, message: str) -> None:
-        if self._capture_worker is not None and self.sender() is self._capture_worker:
-            self._set_message(message, "info")
-            self._capture_worker.prompt_shown()
 
     def _capture_finished(self) -> None:
         """Hasil dari permintaan lama tidak boleh mengubah kontrol sesi baru."""
@@ -449,7 +443,7 @@ class LoginPage(QWidget):
         else:
             self.verify_face_button.setText("Verifikasi Wajah")
             self.face_title.setText("Verifikasi wajah")
-        self.camera_hint.setText("Tatap kamera. Angkat tiga jari saat diminta.")
+        self.camera_hint.setText("Tatap kamera dan pastikan hanya wajah Anda yang terlihat.")
         self.verify_face_button.setEnabled(True)
 
     def _clear_pre_auth(self) -> None:

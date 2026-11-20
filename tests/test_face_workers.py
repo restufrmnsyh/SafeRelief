@@ -5,6 +5,7 @@ from pathlib import Path
 from threading import Event, get_ident
 from time import monotonic, sleep
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import cv2
 import numpy as np
@@ -12,8 +13,8 @@ import pytest
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
-from auth import dongle, face_auth, hand_challenge, session
-from tests.face_camera import mock_hand_camera, observe_pose, stream_poses
+from auth import dongle, face_auth, session
+from tests.face_camera import single_face, stream_frames
 from crypto import keys
 from database import db
 from ui.face_enrollment_dialog import FaceEnrollmentDialog
@@ -33,7 +34,6 @@ def face_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "password_hash": "test-hash",
     })
     monkeypatch.setattr(FaceEnrollmentDialog, "_start_camera", lambda _self: None)
-    mock_hand_camera(monkeypatch)
     monkeypatch.setattr(dongle, "verify_dongle", lambda _user: bytes(32))
     yield app, conn, uid
     session.logout()
@@ -70,10 +70,10 @@ def test_existing_face_logs_success_only_after_all_factors(
     page._stored_encoding = np.full(128, -1 if outcome == "mismatch" else 1, dtype=np.float32)
     page._last_frame = np.zeros((32, 32, 3), dtype=np.uint8)
 
-    def observe(frame: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def observe(frame: np.ndarray) -> np.ndarray:
         if outcome == "error":
             raise cv2.error("camera error")
-        return observe_pose(frame)
+        return single_face(frame)
 
     monkeypatch.setattr(face_auth, "observe_face", observe)
     emitted: list[dict] = []
@@ -88,7 +88,7 @@ def test_existing_face_logs_success_only_after_all_factors(
         def fail_log(*_args, **_kwargs) -> None:
             raise sqlite3.OperationalError("log unavailable")
         monkeypatch.setattr(db, "log_activity", fail_log)
-    timer = stream_poses(page, page.message_label)
+    timer = stream_frames(page)
     try:
         page.verify_current_face()
         assert page._capture_worker is not None
@@ -104,7 +104,8 @@ def test_existing_face_logs_success_only_after_all_factors(
         app.processEvents()
 
 
-def test_expired_camera_frames_are_ignored_and_user_can_retry(face_context, monkeypatch):
+@pytest.mark.parametrize("stale", [True, False], ids=["before-click", "duplicate-frame"])
+def test_expired_camera_frames_are_ignored_and_user_can_retry(face_context, monkeypatch, stale):
     app, _, _ = face_context
     page = FaceEnrollmentDialog("Relawan")
     page._camera_worker = SimpleNamespace(
@@ -112,22 +113,23 @@ def test_expired_camera_frames_are_ignored_and_user_can_retry(face_context, monk
     )
     observations = []
 
-    def observe(frame: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def observe(frame: np.ndarray) -> np.ndarray:
         observations.append(True)
-        return observe_pose(frame)
+        return single_face(frame)
 
     monkeypatch.setattr(face_auth, "observe_face", observe)
     monkeypatch.setattr(FaceCaptureWorker, "TIMEOUT_SECONDS", 0.4)
-    timer = stream_poses(page, page.status_label, "stale")
+    page.capture_button.click()
+    started_at = page._capture_worker._started_at
+    timer = stream_frames(page, timestamp=started_at - 0.001 if stale else started_at + 0.001)
     try:
-        page.capture_button.click()
         process_until(app, lambda: page._capture_worker is None)
-        assert not observations
+        assert len(observations) == (0 if stale else 1)
         assert page.capture_result is None
         assert "Waktu pemeriksaan habis" in page.status_label.text()
         timer.stop()
         monkeypatch.setattr(FaceCaptureWorker, "TIMEOUT_SECONDS", 5)
-        timer = stream_poses(page, page.status_label)
+        timer = stream_frames(page)
         page.capture_button.click()
         process_until(app, lambda: page._capture_worker is None)
         assert page.capture_result is not None
@@ -138,43 +140,10 @@ def test_expired_camera_frames_are_ignored_and_user_can_retry(face_context, monk
         app.processEvents()
 
 
-@pytest.mark.parametrize("box_on_left", [True, False])
-def test_three_finger_challenge_requires_lowering_hand(face_context, monkeypatch, box_on_left: bool) -> None:
-    app, conn, uid = face_context
-    monkeypatch.setattr("ui.face_capture_worker.secrets.choice", lambda _: box_on_left)
-    monkeypatch.setattr(face_auth, "observe_face", observe_pose)
-    page = LoginPage(conn)
-    page._gate_open = True
-    page._preauth_user = dict(db.get_user_by_id(conn, uid))
-    page._transient_master_key = bytearray(os.urandom(32))
-    page._stored_encoding = np.ones(128, dtype=np.float32)
-    page._last_frame = np.zeros((32, 32, 3), dtype=np.uint8)
-    instructions: list[tuple[str, bool]] = []
-
-    def record(message: str) -> None:
-        instructions.append((message.split()[0], session.is_logged_in()))
-
-    timer = stream_poses(page, page.message_label)
-    try:
-        page.verify_current_face()
-        assert page._capture_worker.box_on_left is box_on_left
-        page._capture_worker.instruction.connect(record)
-        process_until(app, lambda: page._capture_worker is None)
-        assert session.is_logged_in()
-        responses = [step for step in instructions if step[0] != "Tatap"]
-        assert responses == [("Angkat", False), ("Turunkan", False)]
-    finally:
-        timer.stop()
-        page.close()
-        page.deleteLater()
-        app.processEvents()
-
-
 @pytest.mark.parametrize("screen", ["login", "volunteer", "existing"])
 @pytest.mark.parametrize("outcome", [
-    "success", "error", "no_face", "cancel", "blocked", "static", "static_three", "two", "four",
-    "never_return", "multiple_faces", "identity_changed", "photo_face", "fist", "unclear",
-    "unstable_then_live", "intermittent_live", "mostly_uncertain",
+    "success", "error", "no_face", "cancel", "blocked",
+    "multiple_faces", "second_face_appears", "identity_changed",
 ])
 def test_face_capture_runs_off_ui_thread_and_ignores_cancelled_results(
     face_context, monkeypatch: pytest.MonkeyPatch, screen: str, outcome: str,
@@ -185,34 +154,28 @@ def test_face_capture_runs_off_ui_thread_and_ignores_cancelled_results(
     threads: list[int] = []
     main_thread = get_ident()
 
-    def detect(frame: np.ndarray):
+    def detect(_frame: np.ndarray):
         threads.append(get_ident())
         entered.set()
         assert release.wait(5)
         if outcome == "error":
             raise cv2.error("simulated OpenCV failure")
         if outcome == "no_face":
-            return None
-        encoding, points = observe_pose(frame)
-        if int(frame[0, 0, 0]) != 128:
-            if outcome == "multiple_faces":
-                raise ValueError("Terdeteksi lebih dari satu wajah.")
-            if outcome == "identity_changed":
-                encoding = -encoding
-        return encoding, points
+            return None, None
+        two_faces = outcome == "multiple_faces" or (outcome == "second_face_appears" and len(threads) > 1)
+        count = 2 if two_faces else 1
+        return None, np.ones((count, 15), dtype=np.float32)
 
-    monkeypatch.setattr(face_auth, "observe_face", detect)
-    if outcome in {"unstable_then_live", "intermittent_live", "mostly_uncertain"}:
-        def live_vote(_frame: np.ndarray, _box: np.ndarray) -> bool:
-            if outcome == "unstable_then_live":
-                return len(threads) > 6
-            if outcome == "intermittent_live":
-                return len(threads) % 5 != 0
-            return len(threads) % 2 == 0
-        monkeypatch.setattr(hand_challenge, "face_is_live", live_vote)
-    expect_timeout = outcome in {"static", "static_three", "two", "four", "fist", "unclear", "never_return"}
-    if expect_timeout or outcome in {"photo_face", "mostly_uncertain"}:
-        monkeypatch.setattr(FaceCaptureWorker, "TIMEOUT_SECONDS", 0.8)
+    def feature(frame: np.ndarray) -> np.ndarray:
+        encoding = single_face(frame)
+        return -encoding if outcome == "identity_changed" and len(threads) > 1 else encoding
+
+    detector, recognizer = Mock(), Mock()
+    detector.detect.side_effect = detect
+    recognizer.alignCrop.side_effect = lambda frame, _face: frame
+    recognizer.feature.side_effect = feature
+    monkeypatch.setattr(face_auth, "_get_detector", lambda: detector)
+    monkeypatch.setattr(face_auth, "_get_recognizer", lambda: recognizer)
     if screen != "volunteer":
         page = LoginPage(conn)
         page._gate_open = True
@@ -230,8 +193,7 @@ def test_face_capture_runs_off_ui_thread_and_ignores_cancelled_results(
             isRunning=lambda: True, requestInterruption=lambda: None,
             wait=lambda _timeout: True,
         )
-    label = page.status_label if screen == "volunteer" else page.message_label
-    timer = stream_poses(page, label, outcome)
+    timer = stream_frames(page)
     tick: list[bool] = []
     try:
         if screen != "volunteer":
@@ -240,8 +202,6 @@ def test_face_capture_runs_off_ui_thread_and_ignores_cancelled_results(
             page.capture_face()
         worker = page._capture_worker
         assert worker is not None
-        instructions: list[str] = []
-        worker.instruction.connect(instructions.append)
         process_until(app, entered.is_set)
         QTimer.singleShot(0, lambda: tick.append(True))
         process_until(app, lambda: bool(tick))
@@ -257,7 +217,7 @@ def test_face_capture_runs_off_ui_thread_and_ignores_cancelled_results(
         process_until(app, lambda: page._capture_worker is None)
         if outcome == "cancel":
             worker.wait(5000)
-        passed = outcome in {"success", "unstable_then_live", "intermittent_live"}
+        passed = outcome == "success"
         if screen != "volunteer":
             stored = db.get_user_by_id(conn, uid)["face_encoding_enc"]
             assert (stored is not None) == (passed and screen == "login")
@@ -272,14 +232,9 @@ def test_face_capture_runs_off_ui_thread_and_ignores_cancelled_results(
             assert "OpenCV failure" in message
         if outcome == "no_face":
             assert "tidak terdeteksi" in message
-        if expect_timeout:
-            assert "Waktu pemeriksaan habis" in message
-        if outcome in {"photo_face", "mostly_uncertain"}:
-            assert "Wajah hidup belum terverifikasi" in message
-        if outcome in {"photo_face", "mostly_uncertain", "unstable_then_live"}:
-            assert any("hadap ke arah cahaya" in prompt for prompt in instructions)
-        if outcome == "multiple_faces":
+        if outcome in {"multiple_faces", "second_face_appears"}:
             assert "lebih dari satu wajah" in message
+            assert recognizer.feature.call_count == (0 if outcome == "multiple_faces" else 1)
         if outcome == "identity_changed":
             assert "Wajah tidak cocok" in message
     finally:

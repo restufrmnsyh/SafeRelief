@@ -1,7 +1,7 @@
 """
 SafeRelief - Download Model ONNX
 
-Unduh model wajah dan tangan yang dipakai saat pendaftaran dan login.
+Unduh YuNet dan SFace untuk pendaftaran dan login.
 Jalankan sekali setelah setup environment.
 
 Usage:
@@ -95,31 +95,23 @@ def main():
             "https://github.com/opencv/opencv_zoo/raw/master/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
         "face_recognition_sface_2021dec.onnx": 
             "https://github.com/opencv/opencv_zoo/raw/master/models/face_recognition_sface/face_recognition_sface_2021dec.onnx",
-        "handpose_estimation_mediapipe_2023feb.onnx":
-            "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/handpose_estimation_mediapipe/handpose_estimation_mediapipe_2023feb.onnx",
-        "anti-spoof-mn3.onnx":
-            "https://storage.openvinotoolkit.org/repositories/open_model_zoo/public/2022.1/anti-spoof-mn3/anti-spoof-mn3.onnx",
-        "handpose-LICENSE.txt":
-            "https://raw.githubusercontent.com/opencv/opencv_zoo/main/models/handpose_estimation_mediapipe/LICENSE",
-        "anti-spoof-LICENSE.txt":
-            "https://raw.githubusercontent.com/kprokofi/light-weight-face-anti-spoofing/master/LICENSE",
     }
     checksums = {
-        "handpose_estimation_mediapipe_2023feb.onnx": "sha256:db0898ae717b76b075d9bf563af315b29562e11f8df5027a1ef07b02bef6d81c",
-        "anti-spoof-mn3.onnx": "sha384:6de4534964b723397b3e8c995cadcf43bc007cc2f9930b95ae25f76adccece5d1d4d058d0b15117b9e4a9f758424f92a",
+        "face_detection_yunet_2023mar.onnx": "sha256:8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+        "face_recognition_sface_2021dec.onnx": "sha256:0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
     }
     
     # Download setiap model
     success_count = 0
     for filename, url in files.items():
-        if download_model(filename, url, models_dir, checksums.get(filename, "")):
+        if download_model(filename, url, models_dir, checksums[filename]):
             success_count += 1
         print()
     
     # Summary
     print("=" * 60)
     if success_count == len(files):
-        print("✅ Model dan lisensi tersedia.")
+        print("✅ Model YuNet dan SFace tersedia.")
         print()
         print("Model siap digunakan di:")
         for filename in files:

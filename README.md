@@ -51,7 +51,7 @@ cd SafeRelief
 pip install -r requirements.txt
 ```
 
-3. Jalankan `python -X utf8 download_models.py` untuk melengkapi model wajah dan tangan di `models/`. Setelah model tersedia, pemeriksaan kamera berjalan offline.
+3. Jalankan `python -X utf8 download_models.py` untuk melengkapi model wajah YuNet dan SFace di `models/`. Setelah model tersedia, pemeriksaan kamera berjalan offline.
 
 ## 🚀 Cara Pakai
 
@@ -72,13 +72,8 @@ python app.py
 
 **PENTING**: Aplikasi hanya bisa dijalankan jika dongle yang valid tercolok.
 
-Saat mendaftarkan wajah atau login, pastikan hanya satu orang terlihat di kamera.
-Tatap kamera dengan kotak di samping wajah dalam keadaan kosong. Saat diminta,
-angkat satu tangan di dalam kotak dengan tepat tiga jari terbuka mengarah ke atas.
-Turunkan tangan setelah petunjuk berubah.
-Jika muncul petunjuk untuk mendekat atau menghadap cahaya, sesuaikan posisi sambil
-mengikuti langkah yang sedang ditampilkan. Kamera akan memeriksa lagi secara otomatis.
-Jika wajah hilang atau kamera mendeteksi orang kedua, ulangi pemeriksaan.
+Saat mendaftarkan wajah atau login, cukup tatap kamera. Jika aplikasi mendeteksi dua
+wajah atau lebih, percobaan langsung ditolak. Ulangi saat hanya wajah Anda yang terlihat.
 
 ## 📁 Struktur Proyek
 
@@ -140,7 +135,7 @@ pytest tests/test_db.py -v
 ### Keterbatasan
 
 - LSB rapuh terhadap kompresi gambar
-- Selama tantangan tiga jari, model anti-spoof juga menilai area wajah. Kamera RGB dapat salah mengklasifikasikan wajah atau foto, terutama jika pencahayaan buruk.
+- Foto wajah dapat lolos pencocokan karena aplikasi tidak memeriksa apakah wajah hidup.
 - Vigenère lemah secara kriptanalisis (hanya lapisan demonstrasi)
 - Vernam bukan OTP murni: keystream pseudo-acak dari HKDF tidak memberi perfect secrecy
 - Nonce 16 byte wajib unik untuk setiap pesan; reuse keystream memungkinkan two-time-pad attack

@@ -10,7 +10,7 @@ import pytest
 from PySide6.QtCore import QObject, QSize, Qt, Signal
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
-from tests.face_camera import mock_hand_camera, observe_pose, stream_poses
+from tests.face_camera import single_face, stream_frames
 
 
 class FakeCameraWorker(QObject):
@@ -320,8 +320,7 @@ def test_face_enrollment_dialog_shows_live_feed_and_captures_encoding(
 ) -> None:
     conn, _ = admin_context
 
-    monkeypatch.setattr(face_auth, "observe_face", observe_pose)
-    mock_hand_camera(monkeypatch)
+    monkeypatch.setattr(face_auth, "observe_face", single_face)
     monkeypatch.setattr(
         "ui.face_enrollment_dialog.CameraWorker",
         FakeCameraWorker,
@@ -342,7 +341,7 @@ def test_face_enrollment_dialog_shows_live_feed_and_captures_encoding(
     assert dialog.camera_label.pixmap() is not None
 
     dialog.capture_face()
-    timer = stream_poses(dialog, dialog.status_label)
+    timer = stream_frames(dialog)
     deadline = monotonic() + 5
     while dialog._capture_worker is not None and monotonic() < deadline:
         qapp.processEvents()

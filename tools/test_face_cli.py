@@ -3,8 +3,7 @@ SafeRelief - Uji Face Authentication via CLI (tools/test_face_cli.py)
 
 Skrip ini dijalankan MANUAL dari terminal untuk menguji face authentication
 dengan webcam fisik. Tidak bisa dijalankan di CI/unit test karena butuh
-kamera nyata. Skrip ini hanya mengukur kecocokan embedding. Pemeriksaan gerakan
-saat pendaftaran dan login bisa dicoba melalui python app.py.
+kamera nyata. Skrip ini mengukur kecocokan embedding wajah.
 
 Cara pakai:
     python tools/test_face_cli.py
@@ -50,7 +49,6 @@ from auth.face_auth import (
     capture_encodings,
     verify_face,
     cosine_similarity,
-    _detect_and_embed,
 )
 
 
@@ -79,7 +77,7 @@ def main() -> None:
     print("=" * 60)
     print("  SafeRelief - Face Authentication CLI Test")
     print("=" * 60)
-    print("Uji kecocokan satu frame. Untuk pemeriksaan gerakan, jalankan python app.py.")
+    print("Tatap kamera. Pastikan hanya wajah Anda yang terlihat.")
     print()
 
     # --- Cek model ---

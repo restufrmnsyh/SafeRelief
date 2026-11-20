@@ -15,7 +15,7 @@ Yang diuji di sini:
 - encoding_to_bytes / bytes_to_encoding: roundtrip serialisasi
 - capture_encodings: mock webcam → embedding rata-rata; webcam gagal → ValueError;
   semua frame tanpa wajah → ValueError
-- _detect_and_embed: frame tanpa wajah → None (via mock detector)
+- observe_face: frame tanpa wajah → None (via mock detector)
 """
 
 import sys
@@ -151,8 +151,8 @@ class TestCosineSimilarity:
 class TestVerifyFace:
 
     def _patch_embed(self, monkeypatch, return_value):
-        """Mock _detect_and_embed agar mengembalikan nilai tetap."""
-        monkeypatch.setattr(face_auth, "_detect_and_embed", lambda frame: return_value)
+        """Mock observe_face agar mengembalikan nilai tetap."""
+        monkeypatch.setattr(face_auth, "observe_face", lambda frame: return_value)
 
     def test_match_above_threshold(self, monkeypatch):
         """Embedding sangat mirip → match=True, score tinggi."""
@@ -245,7 +245,7 @@ class TestEncodingSerialization:
 
 class TestCaptureEncodings:
     """
-    Semua tes di kelas ini mock cv2.VideoCapture dan _detect_and_embed.
+    Semua tes di kelas ini mock cv2.VideoCapture dan observe_face.
     Tidak butuh webcam fisik.
     """
 
@@ -255,14 +255,14 @@ class TestCaptureEncodings:
 
     def test_returns_averaged_embedding(self, monkeypatch):
         """
-        Mock: webcam OK, _detect_and_embed mengembalikan embedding acak.
+        Mock: webcam OK, observe_face mengembalikan embedding acak.
         Hasil harus rata-rata dari embedding yang dikumpulkan.
         """
         embeddings = [_rand_emb(i) for i in range(5)]
         embed_iter = iter(embeddings)
 
         monkeypatch.setattr(
-            face_auth, "_detect_and_embed",
+            face_auth, "observe_face",
             lambda frame: next(embed_iter, None)
         )
 
@@ -285,8 +285,8 @@ class TestCaptureEncodings:
         Webcam OK tapi tidak ada wajah di satu frame pun → ValueError.
         Ini terjadi jika user tidak ada di depan kamera.
         """
-        # _detect_and_embed selalu None
-        monkeypatch.setattr(face_auth, "_detect_and_embed", lambda frame: None)
+        # observe_face selalu None
+        monkeypatch.setattr(face_auth, "observe_face", lambda frame: None)
 
         mock_cap = _make_mock_cap(self._fake_frames(50))
         with patch("cv2.VideoCapture", return_value=mock_cap):
@@ -307,7 +307,7 @@ class TestCaptureEncodings:
             # Kembalikan wajah setiap frame genap, None untuk frame ganjil
             return good_emb if call_count % 2 == 0 else None
 
-        monkeypatch.setattr(face_auth, "_detect_and_embed", sometimes_detect)
+        monkeypatch.setattr(face_auth, "observe_face", sometimes_detect)
 
         mock_cap = _make_mock_cap(self._fake_frames(100))
         with patch("cv2.VideoCapture", return_value=mock_cap):
@@ -318,7 +318,7 @@ class TestCaptureEncodings:
 
     def test_release_called_even_on_error(self, monkeypatch):
         """cap.release() harus dipanggil bahkan saat ValueError terjadi."""
-        monkeypatch.setattr(face_auth, "_detect_and_embed", lambda frame: None)
+        monkeypatch.setattr(face_auth, "observe_face", lambda frame: None)
 
         mock_cap = _make_mock_cap(self._fake_frames(100))
         with patch("cv2.VideoCapture", return_value=mock_cap):
@@ -329,13 +329,13 @@ class TestCaptureEncodings:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Tes _detect_and_embed (mock detector + recognizer)
+# Tes observe_face (mock detector + recognizer)
 # ─────────────────────────────────────────────────────────────────────
 
 class TestDetectAndEmbed:
     """
     Mock _get_detector dan _get_recognizer untuk menguji logika
-    _detect_and_embed tanpa model ONNX.
+    observe_face tanpa model ONNX.
     """
 
     def _make_mocks(self, faces_array, embedding):
@@ -354,13 +354,13 @@ class TestDetectAndEmbed:
         return detector, recognizer
 
     def test_no_faces_returns_none(self, monkeypatch):
-        """YuNet tidak menemukan wajah → _detect_and_embed mengembalikan None."""
+        """YuNet tidak menemukan wajah → observe_face mengembalikan None."""
         detector, recognizer = self._make_mocks(None, None)
         monkeypatch.setattr(face_auth, "_get_detector", lambda: detector)
         monkeypatch.setattr(face_auth, "_get_recognizer", lambda: recognizer)
 
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        result = face_auth._detect_and_embed(frame)
+        result = face_auth.observe_face(frame)
         assert result is None
 
     def test_face_detected_returns_embedding(self, monkeypatch):
@@ -374,13 +374,11 @@ class TestDetectAndEmbed:
         monkeypatch.setattr(face_auth, "_get_recognizer", lambda: recognizer)
 
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        result = face_auth._detect_and_embed(frame)
+        result = face_auth.observe_face(frame)
 
         assert result is not None
         assert result.shape == (128,)
         np.testing.assert_array_equal(result, expected.flatten())
-        _, box = face_auth.observe_face(frame)
-        np.testing.assert_array_equal(box, fake_face[0, :4])
 
     def test_two_faces_rejected_before_recognition(self, monkeypatch):
         detector, recognizer = self._make_mocks(np.ones((2, 15), dtype=np.float32), None)

@@ -1,6 +1,6 @@
-# Model ONNX untuk wajah dan tangan
+# Model ONNX untuk pengenalan wajah
 
-SafeRelief menjalankan keempat model secara lokal saat pendaftaran dan login.
+SafeRelief menjalankan YuNet dan SFace secara lokal saat pendaftaran dan login.
 
 ## Status
 
@@ -8,8 +8,6 @@ SafeRelief menjalankan keempat model secara lokal saat pendaftaran dan login.
 |------|--------|--------|
 | `face_detection_yunet_2023mar.onnx` | ~227 KB | Menghitung dan mencari posisi wajah |
 | `face_recognition_sface_2021dec.onnx` | ~37 MB | Membuat embedding untuk pencocokan identitas |
-| `handpose_estimation_mediapipe_2023feb.onnx` | ~4 MB | Mengukur 21 titik pada tangan di kotak pratinjau |
-| `anti-spoof-mn3.onnx` | ~12 MB | Memeriksa wajah yang dideteksi YuNet |
 
 ---
 
@@ -31,7 +29,7 @@ Simpan file ke folder `models/` di root proyek SafeRelief.
 python -X utf8 download_models.py
 ```
 
-Skrip ini juga mengunduh kedua model tambahan beserta lisensinya dan memeriksa checksum unduhan model tangan dan anti-spoof.
+Skrip memeriksa checksum kedua model dan mengunduh model yang belum tersedia atau rusak.
 
 ### Opsi 3 – Git LFS / clone langsung
 
@@ -73,12 +71,7 @@ YuNet OK
 
 - **YuNet**: https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet
 - **SFace**: https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface
-- Model tangan dan lisensi Apache 2.0 berasal dari [OpenCV Zoo](https://github.com/opencv/opencv_zoo/tree/main/models/handpose_estimation_mediapipe).
-- Model anti-spoof dan spesifikasi input berasal dari [Open Model Zoo](https://github.com/openvinotoolkit/open_model_zoo/tree/master/models/public/anti-spoof-mn3). Lisensi MIT disertakan dalam `anti-spoof-LICENSE.txt`.
 
-Saat pose sesuai, SafeRelief memeriksa lima frame terbaru. Langkah selesai jika
-sedikitnya empat dinilai hidup, termasuk frame terakhir. Batas per frame mengikuti
-ambang kelas spoof 0,40 di [demo penerbit](https://github.com/kprokofi/light-weight-face-anti-spoofing/blob/master/demo/demo.py).
 SafeRelief meminta resolusi kamera 1280 × 720 agar model mendapat detail wajah yang cukup.
 Jika driver gagal mengirim gambar dalam mode itu, aplikasi membuka kembali kamera dengan pengaturan bawaan.
 

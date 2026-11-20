@@ -93,7 +93,7 @@ class FaceEnrollmentDialog(QDialog):
             return
         if self._capture_worker is not None:
             self._capture_worker.submit_frame(self._qimage_to_bgr(image), captured_at)
-        self.camera_label.setPixmap(camera_preview(image, self.camera_label.contentsRect().size(), self._capture_worker))
+        self.camera_label.setPixmap(camera_preview(image, self.camera_label.contentsRect().size()))
 
     @staticmethod
     def _qimage_to_bgr(image: QImage) -> np.ndarray:
@@ -123,19 +123,13 @@ class FaceEnrollmentDialog(QDialog):
         if self._cancelled or self._capture_worker is not None:
             return
         self.capture_button.setEnabled(False)
-        self.status_label.setText("Memulai pemeriksaan wajah...")
+        self.status_label.setText("Merekam wajah. Tetap tatap kamera sebentar.")
 
         worker = FaceCaptureWorker()
         self._capture_worker = worker
-        worker.instruction.connect(self._show_face_instruction)
         worker.completed.connect(self._capture_completed)
         worker.finished.connect(self._capture_finished)
         worker.start()
-
-    def _show_face_instruction(self, message: str) -> None:
-        if self._capture_worker is not None and self.sender() is self._capture_worker:
-            self.status_label.setText(message)
-            self._capture_worker.prompt_shown()
 
     def _capture_finished(self) -> None:
         """Aktifkan tombol coba lagi setelah worker selesai."""

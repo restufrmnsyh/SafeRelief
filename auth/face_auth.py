@@ -16,7 +16,7 @@ Kenapa YuNet + SFace:
 - Tidak perlu library face_recognition yang butuh dlib/cmake
 
 Keterbatasan (untuk laporan):
-- Pose tiga jari disertai pemeriksaan wajah hidup. Kamera RGB tidak mengukur kedalaman.
+- Pencocokan wajah juga dapat menerima foto karena tidak menguji apakah wajah hidup.
 - Embedding tidak dienkripsi saat di RAM (hanya saat disimpan ke DB)
 - Threshold 0.363 default dari paper SFace; butuh kalibrasi per lingkungan
 
@@ -123,8 +123,8 @@ def _get_recognizer() -> cv2.FaceRecognizerSF:
 # Fungsi inti
 # ──────────────────────────────────────────────────────────────────────
 
-def observe_face(frame: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
-    """Ambil embedding dan kotak dari wajah yang sama. Tolak wajah ganda."""
+def observe_face(frame: np.ndarray) -> np.ndarray | None:
+    """Ambil embedding hanya jika YuNet mendeteksi tepat satu wajah."""
     detector = _get_detector()
     h, w = frame.shape[:2]
     detector.setInputSize((w, h))
@@ -137,13 +137,7 @@ def observe_face(frame: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
     face = faces[0]
     recognizer = _get_recognizer()
     aligned = recognizer.alignCrop(frame, face)
-    return recognizer.feature(aligned).flatten(), face[:4].copy()
-
-
-def _detect_and_embed(frame: np.ndarray) -> Optional[np.ndarray]:
-    """Ekstrak embedding satu frame untuk alat diagnostik."""
-    observation = observe_face(frame)
-    return None if observation is None else observation[0]
+    return recognizer.feature(aligned).flatten()
 
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -210,7 +204,7 @@ def capture_encodings(n: int = None) -> np.ndarray:
             if not ret or frame is None:
                 continue
 
-            emb = _detect_and_embed(frame)
+            emb = observe_face(frame)
             if emb is not None:
                 embeddings.append(emb)
     finally:
@@ -249,7 +243,7 @@ def verify_face(
     Raises:
         FileNotFoundError: Model ONNX belum diunduh.
     """
-    live_embedding = _detect_and_embed(frame)
+    live_embedding = observe_face(frame)
     if live_embedding is None:
         return False, 0.0
 
