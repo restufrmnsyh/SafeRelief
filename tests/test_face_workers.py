@@ -12,7 +12,7 @@ import pytest
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
-from auth import dongle, face_auth, session
+from auth import dongle, face_auth, hand_challenge, session
 from tests.face_camera import mock_hand_camera, observe_pose, stream_poses
 from crypto import keys
 from database import db
@@ -174,6 +174,7 @@ def test_three_finger_challenge_requires_lowering_hand(face_context, monkeypatch
 @pytest.mark.parametrize("outcome", [
     "success", "error", "no_face", "cancel", "blocked", "static", "static_three", "two", "four",
     "never_return", "multiple_faces", "identity_changed", "photo_face", "fist", "unclear",
+    "unstable_then_live", "intermittent_live", "mostly_uncertain",
 ])
 def test_face_capture_runs_off_ui_thread_and_ignores_cancelled_results(
     face_context, monkeypatch: pytest.MonkeyPatch, screen: str, outcome: str,
@@ -201,8 +202,16 @@ def test_face_capture_runs_off_ui_thread_and_ignores_cancelled_results(
         return encoding, points
 
     monkeypatch.setattr(face_auth, "observe_face", detect)
+    if outcome in {"unstable_then_live", "intermittent_live", "mostly_uncertain"}:
+        def live_vote(_frame: np.ndarray, _box: np.ndarray) -> bool:
+            if outcome == "unstable_then_live":
+                return len(threads) > 6
+            if outcome == "intermittent_live":
+                return len(threads) % 5 != 0
+            return len(threads) % 2 == 0
+        monkeypatch.setattr(hand_challenge, "face_is_live", live_vote)
     expect_timeout = outcome in {"static", "static_three", "two", "four", "fist", "unclear", "never_return"}
-    if expect_timeout:
+    if expect_timeout or outcome in {"photo_face", "mostly_uncertain"}:
         monkeypatch.setattr(FaceCaptureWorker, "TIMEOUT_SECONDS", 0.8)
     if screen != "volunteer":
         page = LoginPage(conn)
@@ -231,6 +240,8 @@ def test_face_capture_runs_off_ui_thread_and_ignores_cancelled_results(
             page.capture_face()
         worker = page._capture_worker
         assert worker is not None
+        instructions: list[str] = []
+        worker.instruction.connect(instructions.append)
         process_until(app, entered.is_set)
         QTimer.singleShot(0, lambda: tick.append(True))
         process_until(app, lambda: bool(tick))
@@ -246,15 +257,16 @@ def test_face_capture_runs_off_ui_thread_and_ignores_cancelled_results(
         process_until(app, lambda: page._capture_worker is None)
         if outcome == "cancel":
             worker.wait(5000)
+        passed = outcome in {"success", "unstable_then_live", "intermittent_live"}
         if screen != "volunteer":
             stored = db.get_user_by_id(conn, uid)["face_encoding_enc"]
-            assert (stored is not None) == (outcome == "success" and screen == "login")
-            assert session.is_logged_in() == (outcome == "success")
+            assert (stored is not None) == (passed and screen == "login")
+            assert session.is_logged_in() == passed
             success_logs = [r for r in db.list_activity_log(conn) if r["aksi"] == "LOGIN_SUCCESS"]
-            assert len(success_logs) == int(outcome == "success")
+            assert len(success_logs) == int(passed)
             message = page.message_label.text()
         else:
-            assert (page.capture_result is not None) == (outcome in {"success", "blocked"})
+            assert (page.capture_result is not None) == (passed or outcome == "blocked")
             message = page.status_label.text()
         if outcome == "error":
             assert "OpenCV failure" in message
@@ -262,8 +274,10 @@ def test_face_capture_runs_off_ui_thread_and_ignores_cancelled_results(
             assert "tidak terdeteksi" in message
         if expect_timeout:
             assert "Waktu pemeriksaan habis" in message
-        if outcome == "photo_face":
+        if outcome in {"photo_face", "mostly_uncertain"}:
             assert "Wajah hidup belum terverifikasi" in message
+        if outcome in {"photo_face", "mostly_uncertain", "unstable_then_live"}:
+            assert any("hadap ke arah cahaya" in prompt for prompt in instructions)
         if outcome == "multiple_faces":
             assert "lebih dari satu wajah" in message
         if outcome == "identity_changed":

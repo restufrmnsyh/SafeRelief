@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import cv2
 import numpy as np
 import pytest
 
@@ -56,6 +57,31 @@ def _make_mock_cap(frames: list[np.ndarray], open_ok: bool = True) -> MagicMock:
     call_results = [(True, f) for f in frames] + [(False, None)] * 50
     cap.read.side_effect = call_results
     return cap
+
+
+@pytest.mark.parametrize("mode", ["hd", "driver_default", "no_frames", "driver_error"])
+def test_preview_negotiates_hd_and_falls_back_to_working_camera(monkeypatch, mode: str) -> None:
+    frame = np.zeros((8, 8, 3), dtype=np.uint8)
+    camera = _make_mock_cap([] if mode == "no_frames" else [frame])
+    fallback = _make_mock_cap([frame])
+    camera.set.return_value = mode != "driver_default"
+    if mode == "driver_error":
+        camera.set.side_effect = cv2.error("unsupported mode")
+    open_camera = MagicMock(side_effect=[camera, fallback])
+    monkeypatch.setattr(face_auth, "_open_camera", open_camera)
+
+    result = face_auth.open_preview_camera()
+    if mode in {"no_frames", "driver_error"}:
+        assert result is fallback
+        assert open_camera.call_count == 2
+        camera.release.assert_called_once()
+        fallback.set.assert_not_called()
+    else:
+        assert result is camera
+        open_camera.assert_called_once_with(0)
+        camera.set.assert_any_call(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        camera.set.assert_any_call(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        camera.release.assert_not_called()
 
 
 # ─────────────────────────────────────────────────────────────────────

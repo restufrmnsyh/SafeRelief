@@ -58,6 +58,23 @@ def _open_camera(index: int = 0) -> cv2.VideoCapture:
         "tidak dipakai aplikasi lain."
     )
 
+
+def open_preview_camera() -> cv2.VideoCapture:
+    """Minta 720p agar crop wajah cukup rinci sebelum diperkecil ke input model."""
+    camera = _open_camera(0)
+    try:
+        camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        ok, frame = camera.read()
+        if ok and frame is not None:
+            return camera
+    except cv2.error:
+        pass
+    # Beberapa driver menerima set() tetapi tidak mengirim frame dalam mode itu.
+    camera.release()
+    return _open_camera(0)
+
 # ──────────────────────────────────────────────────────────────────────
 # Inisialisasi model (lazy — hanya dimuat saat pertama dipakai)
 # ──────────────────────────────────────────────────────────────────────

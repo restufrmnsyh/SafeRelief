@@ -23,8 +23,11 @@ def face_is_live(frame: np.ndarray, box: np.ndarray) -> bool:
     x1, x2 = np.clip([int(x), int(x + w)], 0, width)
     y1, y2 = np.clip([int(y), int(y + h)], 0, height)
     if min(x2 - x1, y2 - y1) < 48:
-        raise ValueError("Dekatkan wajah ke kamera, lalu ulangi.")
-    crop = cv2.resize(frame[y1:y2, x1:x2], (128, 128))
+        return False
+    # Demo anti-spoof-mn3 memberi sedikit ruang di sekeliling deteksi wajah.
+    x1, x2 = np.clip([int(x - 0.05 * w), int(x + 1.05 * w)], 0, width)
+    y1, y2 = np.clip([int(y - 0.025 * h), int(y + 1.025 * h)], 0, height)
+    crop = cv2.resize(frame[y1:y2, x1:x2], (128, 128), interpolation=cv2.INTER_CUBIC)
     rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB).astype(np.float32)
     # Normalisasi dan urutan kelas mengikuti spesifikasi ONNX asli anti-spoof-mn3.
     rgb -= (151.2405, 119.5950, 107.8395)
@@ -32,7 +35,13 @@ def face_is_live(frame: np.ndarray, box: np.ndarray) -> bool:
     model = _net(config.FACE_ANTISPOOF_MODEL)
     model.setInput(cv2.dnn.blobFromImage(rgb))
     probabilities = model.forward().ravel()
-    return probabilities.size == 2 and np.isfinite(probabilities).all() and probabilities[0] >= 0.80
+    if probabilities.size != 2 or not np.all((probabilities >= 0) & (probabilities <= 1)):
+        raise ValueError("Hasil model wajah tidak valid. Ulangi pemeriksaan.")
+    if not np.isclose(probabilities.sum(), 1.0, atol=1e-4):
+        raise ValueError("Hasil model wajah tidak valid. Ulangi pemeriksaan.")
+    # Demo penerbit memakai batas 0,40 untuk kelas spoof. Worker juga memerlukan
+    # persetujuan beberapa frame dari wajah yang sama di setiap tahap.
+    return bool(probabilities[1] <= 0.40)
 
 
 def hand_box(width: int, height: int, on_left: bool) -> tuple[int, int, int]:

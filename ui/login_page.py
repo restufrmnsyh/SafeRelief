@@ -37,7 +37,7 @@ class CameraWorker(QThread):
     def run(self) -> None:
         camera = None
         try:
-            camera = face_auth._open_camera(0)
+            camera = face_auth.open_preview_camera()
             if not camera.isOpened():
                 self.camera_error.emit("Webcam tidak dapat dibuka.")
                 return

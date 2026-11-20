@@ -36,19 +36,40 @@ def test_real_networks_on_empty_camera_image() -> None:
     assert not hand_challenge.face_is_live(frame, np.array([20, 20, 80, 80]))
 
 
-def test_antispoof_uses_only_the_detected_face_and_rgb_normalization(monkeypatch) -> None:
+def test_antispoof_uses_padded_face_crop_and_rgb_normalization(monkeypatch) -> None:
     frame = np.zeros((160, 160, 3), np.uint8)
-    frame[24:88, 30:94] = (10, 80, 140)
+    # Kotak deteksi 64 x 64 diperluas seperti di demo model, termasuk tepi berwarna.
+    frame[22:89, 26:97] = (10, 80, 140)
+    frame[24:88, 30:94] = (40, 80, 140)
     net = Mock()
     monkeypatch.setattr(hand_challenge, "_net", lambda _: net)
     net.forward.return_value = np.array([[0.98, 0.02]], dtype=np.float32)
     box = np.array([30, 24, 64, 64])
     assert hand_challenge.face_is_live(frame, box)
     blob = net.setInput.call_args.args[0]
-    expected = (np.array([140, 80, 10]) - [151.2405, 119.595, 107.8395]) / [63.0105, 56.457, 55.0035]
-    np.testing.assert_allclose(blob.mean(axis=(0, 2, 3)), expected, atol=1e-5)
+    for pixel, blue in [((0, 0), 10), ((64, 64), 40)]:
+        expected = (np.array([140, 80, blue]) - [151.2405, 119.595, 107.8395]) / [63.0105, 56.457, 55.0035]
+        np.testing.assert_allclose(blob[0, :, pixel[0], pixel[1]], expected, atol=1e-5)
     net.forward.return_value = np.array([[0.02, 0.98]], dtype=np.float32)
     assert not hand_challenge.face_is_live(frame, box)
+
+
+@pytest.mark.parametrize("probabilities, live", [([0.65, 0.35], True), ([0.59, 0.41], False)])
+def test_reference_classifier_decision(monkeypatch, probabilities, live: bool) -> None:
+    net = Mock()
+    net.forward.return_value = np.array([probabilities], dtype=np.float32)
+    monkeypatch.setattr(hand_challenge, "_net", lambda _: net)
+    frame = np.zeros((96, 96, 3), dtype=np.uint8)
+    assert hand_challenge.face_is_live(frame, np.array([0, 0, 96, 96])) is live
+
+
+@pytest.mark.parametrize("values", [[np.nan, 0], [0, 0], [0.99], [1.01, -0.01]])
+def test_invalid_classifier_output_cannot_give_a_live_vote(monkeypatch, values) -> None:
+    net = Mock()
+    net.forward.return_value = np.array([values], dtype=np.float32)
+    monkeypatch.setattr(hand_challenge, "_net", lambda _: net)
+    with pytest.raises(ValueError, match="model wajah tidak valid"):
+        hand_challenge.face_is_live(np.zeros((96, 96, 3), np.uint8), np.array([0, 0, 96, 96]))
 
 
 def test_failed_download_preserves_existing_model(tmp_path: Path) -> None:

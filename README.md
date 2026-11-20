@@ -76,6 +76,8 @@ Saat mendaftarkan wajah atau login, pastikan hanya satu orang terlihat di kamera
 Tatap kamera dengan kotak di samping wajah dalam keadaan kosong. Saat diminta,
 angkat satu tangan di dalam kotak dengan tepat tiga jari terbuka mengarah ke atas.
 Turunkan tangan setelah petunjuk berubah.
+Jika muncul petunjuk untuk mendekat atau menghadap cahaya, sesuaikan posisi sambil
+mengikuti langkah yang sedang ditampilkan. Kamera akan memeriksa lagi secara otomatis.
 Jika wajah hilang atau kamera mendeteksi orang kedua, ulangi pemeriksaan.
 
 ## 📁 Struktur Proyek

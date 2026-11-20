@@ -1,6 +1,7 @@
 """Periksa satu wajah dan respons gerakan pada frame baru selama pendaftaran atau login."""
 
 import secrets
+from collections import deque
 from queue import Empty, Full, Queue
 from threading import Lock
 from time import monotonic
@@ -39,7 +40,8 @@ class FaceCaptureWorker(QThread):
     instruction = Signal(str)
     completed = Signal(object, str)
     TIMEOUT_SECONDS = 20
-    FRAMES_PER_POSE = 3
+    FRAMES_PER_POSE = 5
+    MIN_LIVE_FRAMES = 4
 
     def __init__(self, stored_encoding: np.ndarray | None = None) -> None:
         app = QApplication.instance()
@@ -68,7 +70,7 @@ class FaceCaptureWorker(QThread):
         self.requestInterruption()
         self.wait()
 
-    def _next_observation(self, deadline: float) -> tuple[np.ndarray, int | None] | None:
+    def _next_observation(self, deadline: float) -> tuple[np.ndarray, bool, int | None] | None:
         while not self.isInterruptionRequested():
             if monotonic() >= deadline:
                 break
@@ -83,46 +85,60 @@ class FaceCaptureWorker(QThread):
                 if observation is None:
                     raise ValueError("Wajah tidak terdeteksi. Hadapkan wajah ke kamera, lalu ulangi.")
                 embedding, face_box = observation
-                if not hand_challenge.face_is_live(frame, face_box):
-                    raise ValueError("Wajah hidup belum terverifikasi. Pastikan wajah terlihat jelas, lalu ulangi.")
+                live = hand_challenge.face_is_live(frame, face_box)
                 fingers = hand_challenge.visible_fingers(frame, self.box_on_left)
             if monotonic() >= deadline:
                 break
-            return embedding, fingers
-        if self.isInterruptionRequested():
-            return None
-        raise ValueError("Waktu pemeriksaan habis. Ulangi dan ikuti petunjuk tangan di layar.")
+            return embedding, live, fingers
+        return None
 
     def run(self) -> None:
         deadline = monotonic() + self.TIMEOUT_SECONDS
         prompts = [
-            (None, "Tatap kamera dan kosongkan kotak di samping wajah."),
-            (3, "Angkat tepat tiga jari. Posisikan seluruh telapak di dalam kotak dengan jari ke atas."),
-            (None, "Turunkan tangan sampai kotak kosong kembali."),
+            (None, "Tatap kamera. Biarkan kotak kosong."),
+            (3, "Angkat tiga jari di dalam kotak dan tahan sebentar."),
+            (None, "Turunkan tangan sampai kotak kosong."),
         ]
         try:
             reference = self._reference
             embeddings: list[np.ndarray] = []
             for required, instruction in prompts:
+                liveness_hint_shown = False
                 self._prompted_at = float("inf")
                 self.instruction.emit(instruction)
-                consecutive: list[np.ndarray] = []
-                while len(consecutive) < self.FRAMES_PER_POSE:
+                # Setiap langkah memerlukan bukti baru dari wajah dan pose tangan yang sama.
+                samples: deque[tuple[np.ndarray, bool]] = deque(maxlen=self.FRAMES_PER_POSE)
+                while True:
                     observation = self._next_observation(deadline)
                     if observation is None:
-                        return
-                    embedding, fingers = observation
+                        if self.isInterruptionRequested():
+                            return
+                        if liveness_hint_shown:
+                            raise ValueError("Wajah hidup belum terverifikasi. Coba lagi dengan cahaya dari depan.")
+                        raise ValueError("Waktu pemeriksaan habis. Ulangi dan ikuti petunjuk di layar.")
+                    embedding, live, fingers = observation
                     if reference is None:
                         reference = embedding
                     similarity = face_auth.cosine_similarity(reference, embedding)
                     if not np.isfinite(similarity) or similarity < config.FACE_MATCH_THRESHOLD:
                         raise ValueError("Wajah tidak cocok. Ulangi dengan orang yang sama.")
                     if fingers != required:
-                        consecutive.clear()
+                        samples.clear()
+                        if live and liveness_hint_shown:
+                            self.instruction.emit(instruction)
+                            liveness_hint_shown = False
                         continue
-                    consecutive.append(embedding)
-                if required is None:
-                    embeddings.extend(consecutive)
+                    samples.append((embedding, live))
+                    if len(samples) < self.FRAMES_PER_POSE:
+                        continue
+                    live_samples = [sample for sample, passed in samples if passed]
+                    if live and len(live_samples) >= self.MIN_LIVE_FRAMES:
+                        if required is None:
+                            embeddings.extend(live_samples)
+                        break
+                    if not liveness_hint_shown:
+                        liveness_hint_shown = True
+                        self.instruction.emit(instruction + " Dekatkan sedikit wajah dan hadap ke arah cahaya.")
             if not self.isInterruptionRequested():
                 self.completed.emit(np.mean(embeddings, axis=0).astype(np.float32), "")
         except (OSError, ValueError, cv2.error) as exc:
