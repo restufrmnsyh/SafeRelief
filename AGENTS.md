@@ -124,7 +124,7 @@ Kunci turunan dihitung di memori, tidak pernah ditulis ke disk atau database. Di
 - ChaCha20-Poly1305, nonce 12 byte acak di awal file `.enc`.
 - File `.enc` disimpan di `storage/` dengan **nama UUID**; nama asli di tabel `files.nama_asli`.
 - Dekripsi gagal dengan `InvalidTag` berarti tampilkan "File rusak atau telah diubah" dan catat ke log.
-- Relawan unggah; admin unduh dan dekripsi (kunci otomatis dari master key).
+- Relawan mengunggah dokumen atau video. Admin mengunduh ciphertext sebagai `nama-asli.ext.enc`. Melalui **Buka Berkas Terenkripsi**, admin memilih file unduhan dan melihat hasil dekripsi di aplikasi. Pratinjau memakai memori sesi untuk menampilkan foto, PDF, video, atau teks dokumen Office, lalu ditutup saat logout.
 
 ### 6.3 Database (kolom sensitif)
 - Kolom berakhiran `_enc` berisi BLOB `nonce(12) + ciphertext + tag` AES-GCM, kunci `b"db"`.
@@ -139,6 +139,7 @@ Kunci turunan dihitung di memori, tidak pernah ditulis ke disk atau database. Di
 - Header 4 byte (panjang payload) di awal. Tolak jika kapasitas tidak cukup (`ValueError` pesan jelas).
 - Output selalu PNG (lossless). Input JPG dikonversi dengan peringatan.
 - Ekstrak oleh admin menampilkan metadata. Foto yang diedit/dikompres gagal diekstrak.
+- Saat admin mengunduh foto, SafeRelief mengenkripsi seluruh PNG stego dengan ChaCha20-Poly1305 (kunci `b"file"`) menjadi `foto-ID.png.enc`. Dekripsi unduhan memulihkan PNG beserta payload LSB.
 
 ### 6.5 Blockchain (distribusi bantuan)
 - Block: `index, timestamp, data(dict), prev_hash, nonce, hash`.

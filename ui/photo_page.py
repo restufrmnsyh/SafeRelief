@@ -30,6 +30,7 @@ import config
 from auth import session
 from crypto import aes_module, stego_lsb
 from database import db, secure_store
+from ui.encrypted_downloads import EncryptedDownloads
 from ui.photo_metadata import PhotoMetadataPanel
 
 
@@ -137,12 +138,14 @@ class PhotoPage(QWidget):
         self.decrypt_button.setVisible(self._role == "admin")
         self.delete_button = QPushButton("Hapus")
         self.delete_button.clicked.connect(self.delete_selected_photo)
-        self.metadata_view = PhotoMetadataPanel()
+        self.metadata_view = PhotoMetadataPanel() if self._role == "admin" else None
         self.image_view = QLabel("Preview foto akan tampil setelah decrypt.")
         self.image_view.setMinimumHeight(220)
         self.image_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_view.setStyleSheet("border: 1px solid #555; background: #111; color: #ddd;")
         self.status_label = QLabel()
+        self.downloads = EncryptedDownloads(self, conn, self._user_id, lambda: self._authorized("admin"))
+        self.downloads.status.connect(self.status_label.setText)
         self.back_button = QPushButton("Kembali ke Dashboard")
         self.back_button.clicked.connect(self.dashboard_requested.emit)
         self.logout_button = QPushButton("Logout")
@@ -170,10 +173,21 @@ class PhotoPage(QWidget):
             layout.addLayout(form)
         layout.addWidget(self.table, 1)
         layout.addLayout(actions)
+        if self._role == "admin":
+            transfers = QHBoxLayout()
+            self.download_button = QPushButton("Unduh Foto")
+            self.download_button.clicked.connect(self.download_selected)
+            self.open_button = QPushButton("Buka Berkas Terenkripsi")
+            self.open_button.clicked.connect(self.downloads.choose_and_decrypt)
+            transfers.addWidget(self.download_button)
+            transfers.addWidget(self.open_button)
+            transfers.addStretch()
+            layout.addLayout(transfers)
         layout.addWidget(QLabel("Preview foto"))
         layout.addWidget(self.image_view)
-        layout.addWidget(QLabel("Metadata foto"))
-        layout.addWidget(self.metadata_view)
+        if self.metadata_view is not None:
+            layout.addWidget(QLabel("Metadata foto"))
+            layout.addWidget(self.metadata_view)
         layout.addWidget(self.status_label)
         self.table.itemSelectionChanged.connect(self._selected_photo_changed)
         self.refresh()
@@ -369,7 +383,8 @@ class PhotoPage(QWidget):
 
     def _selected_photo_changed(self) -> None:
         """Metadata yang dibuka hanya berlaku untuk foto yang sedang dipilih."""
-        self.metadata_view.show_empty()
+        if self.metadata_view is not None:
+            self.metadata_view.show_empty()
         self._refresh_selected_photo_preview()
 
     def _refresh_selected_photo_preview(self) -> None:
@@ -410,6 +425,22 @@ class PhotoPage(QWidget):
             self.image_view.clear()
             self.image_view.setText("Preview foto tidak tersedia.")
 
+    def download_selected(self) -> None:
+        """Enkripsi seluruh PNG agar payload LSB juga ikut dalam unduhan."""
+        if not self._authorized("admin"):
+            return
+        row = self.table.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Unduh foto", "Pilih foto terlebih dahulu.")
+            return
+        photo_id = int(self.table.item(row, 0).text())
+        photo = next(item for item in self._photos if item["id"] == photo_id)
+        try:
+            source = self._stored_image_path(photo["image_path"])
+            self.downloads.download(source, f"foto-{photo_id}.png", encrypt_photo=True)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Gagal mengunduh foto", str(exc))
+
     def delete_selected_photo(self) -> None:
         """Hapus foto yang dipilih dengan konfirmasi dan bersihkan file di storage."""
         if not self._authorized():
@@ -446,7 +477,7 @@ class PhotoPage(QWidget):
 
     def extract_selected(self) -> None:
         """Ambil payload terenkripsi tanpa membuka plaintext agar admin harus decrypt eksplisit."""
-        if not self._authorized("admin"):
+        if not self._authorized("admin") or self.metadata_view is None:
             return
         row = self.table.currentRow()
         if row < 0:
@@ -463,7 +494,7 @@ class PhotoPage(QWidget):
             self._preview_unlocked_by_row[photo_id] = False
             self.image_view.clear()
             self.image_view.setText("Preview foto akan tampil setelah decrypt.")
-            self.status_label.setText("Metadata foto masih terenkripsi. Klik Decrypt untuk melihat isi aslinya.")
+            self.status_label.clear()
         except (OSError, ValueError) as exc:
             message = f"Foto rusak atau payload tidak valid: {exc}"
             self.metadata_view.show_error(message)
@@ -472,7 +503,7 @@ class PhotoPage(QWidget):
 
     def decrypt_selected(self) -> None:
         """Decrypt payload stego dan tampilkan metadata serta preview foto asli setelah verifikasi."""
-        if not self._authorized("admin"):
+        if not self._authorized("admin") or self.metadata_view is None:
             return
         row = self.table.currentRow()
         if row < 0:
@@ -539,6 +570,7 @@ class PhotoPage(QWidget):
 
     def stop_worker(self, *, cancel_pending: bool = False) -> None:
         """Tunggu penyisipan yang sedang berjalan sebelum jendela ditutup."""
+        self.downloads.stop(cancel_pending=cancel_pending)
         self._cancelled = cancel_pending
         if self._worker is not None and self._worker.isRunning():
             self._worker.wait()
@@ -566,6 +598,7 @@ class PhotoPage(QWidget):
 
     def clear_sensitive_state(self) -> None:
         """Clear extracted photo metadata and cached gallery rows."""
-        self.metadata_view.clear()
+        if self.metadata_view is not None:
+            self.metadata_view.clear()
         self._photos.clear()
         self.table.setRowCount(0)

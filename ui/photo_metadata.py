@@ -108,7 +108,7 @@ class PhotoMetadataPanel(QFrame):
 
     def show_encrypted(self, payload: bytes) -> None:
         """Ciphertext tetap bisa diperiksa untuk demonstrasi steganografi."""
-        self._state("Metadata terenkripsi", "Payload berhasil diekstrak. Klik Decrypt untuk membuka metadata.", "neutral")
+        self._state("Ciphertext metadata (hex)", "Klik Decrypt untuk membuka metadata.", "neutral")
         self.payload_view.setPlainText(payload.hex())
         self.payload_view.show()
 

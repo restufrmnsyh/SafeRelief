@@ -162,8 +162,9 @@ def test_admin_detail_shows_ciphertext_and_hides_plaintext_until_decrypt(
         if dialog._table.item(i, 0).text() == "nik"
     )
     ciphertext = dialog._table.item(row, 1).text()
-    assert ciphertext != "-" and ciphertext != ""
-    assert dialog._table.item(row, 2).text() == "(terenkripsi)"
+    assert base64.b64decode(ciphertext) == db.get_victim_by_id(conn, victim_id)["nik_enc"]
+    assert dialog._table.isColumnHidden(2)
+    assert dialog._table.item(row, 2).text() == ""
     assert "1234567890123456" not in "\n".join(
         dialog._table.item(r, 2).text() for r in range(dialog._table.rowCount())
     )
@@ -195,6 +196,7 @@ def test_admin_decrypt_populates_plaintext_and_logs_only_decrypt_event(
         if dialog._table.item(i, 0).text() == "nik"
     )
     assert dialog._table.item(row, 2).text() == "1234567890123456"
+    assert not dialog._table.isColumnHidden(2)
     log_rows = db.list_activity_log(conn, limit=10)
     assert len(log_rows) == 1
     assert log_rows[0]["aksi"] == "VICTIM_DECRYPTED"
@@ -264,7 +266,8 @@ def test_admin_detail_handles_null_sensitive_fields_and_wrong_db_key(
         i for i in range(page._detail_dialog._table.rowCount())
         if page._detail_dialog._table.item(i, 0).text() == "nik"
     )
-    assert page._detail_dialog._table.item(row, 2).text() == "(terenkripsi)"
+    assert page._detail_dialog._table.item(row, 2).text() == ""
+    assert page._detail_dialog._table.isColumnHidden(2)
     assert page._detail_dialog._summary.isHidden()
     assert page.table.isColumnHidden(2)
     assert page.table.item(1, 2).text() == ""
@@ -306,7 +309,8 @@ def test_clear_sensitive_state_closes_dialog_and_clears_plaintext(victims_contex
     dialog = page._detail_dialog
     assert dialog is not None
     page._decrypt_victim(victim_id)
-    assert dialog._table.item(0, 2).text() != "(terenkripsi)"
+    assert not dialog._table.isColumnHidden(2)
+    assert dialog._table.item(0, 2).text()
     page.clear_sensitive_state()
     assert page._detail_dialog is None
     assert page.table.rowCount() == 0

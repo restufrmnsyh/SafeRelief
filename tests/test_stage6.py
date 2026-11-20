@@ -250,7 +250,8 @@ def test_end_session_rejects_all_visible_dialogs_before_discarding_pages(
         assert accepted == []
         assert len(rejected) == len(dialogs)
         assert hidden_rejected == []
-        assert detail._table.item(0, 2).text() == "(terenkripsi)"
+        assert detail._table.item(0, 2).text() == ""
+        assert detail._table.isColumnHidden(2)
         assert window.dashboard_page is None
         assert window.victims_page is None
         assert not session.is_logged_in()

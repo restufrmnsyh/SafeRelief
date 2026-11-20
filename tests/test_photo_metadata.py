@@ -40,6 +40,26 @@ def test_metadata_formats_missing_values_time_and_literal_text(workspace_app) ->
         workspace_app.processEvents()
 
 
+def test_volunteer_photo_workspace_only_shows_upload_and_preview(workspace_context, workspace_app) -> None:
+    _, users, master = workspace_context
+    window = MainWindow()
+    session.login(users["relawan"], master)
+    window._show_dashboard(session.get_current_user())
+    window._open_page("photos")
+    window.show()
+    try:
+        workspace_app.processEvents()
+        page = window.photo_page
+        assert page.findChild(PhotoMetadataPanel) is None
+        assert all(label.text() != "Metadata foto" for label in page.findChildren(QLabel))
+        assert page.upload_button.isVisible() and page.caption_input.isVisible()
+        assert page.image_view.isVisible()
+        window._end_session("Logout uji relawan.")
+    finally:
+        window.close()
+        workspace_app.processEvents()
+
+
 @pytest.mark.parametrize("width", [480, 980, 1440])
 def test_verified_metadata_stays_inside_photo_workspace(
     workspace_context, workspace_app, width: int,

@@ -180,13 +180,16 @@ class VictimDetailDialog(QDialog):
         table.setColumnWidth(0, 200)
         table.setColumnWidth(1, 350)
         table.setColumnWidth(2, 250)
+        table.hideColumn(2)
 
         for field_name, blob in self._fields.items():
             row = table.rowCount()
             table.insertRow(row)
             table.setItem(row, 0, QTableWidgetItem(field_name))
-            table.setItem(row, 1, QTableWidgetItem(_ciphertext_text(blob)))
-            table.setItem(row, 2, QTableWidgetItem("(terenkripsi)"))
+            ciphertext = QTableWidgetItem(_ciphertext_text(blob))
+            ciphertext.setToolTip(ciphertext.text())
+            table.setItem(row, 1, ciphertext)
+            table.setItem(row, 2, QTableWidgetItem())
 
         layout.addWidget(table)
         buttons = QHBoxLayout()
@@ -204,6 +207,7 @@ class VictimDetailDialog(QDialog):
     def show_plaintext(self, detail: dict) -> None:
         """Isi kolom plaintext dengan hasil dekripsi yang baru saja diminta."""
         self._summary.show()
+        self._table.showColumn(2)
         for row in range(self._table.rowCount()):
             field_name = self._table.item(row, 0).text()
             value = detail.get(field_name)
@@ -216,8 +220,9 @@ class VictimDetailDialog(QDialog):
     def clear_plaintext(self) -> None:
         """Kosongkan semua plaintext agar tidak tertinggal setelah logout."""
         self._summary.hide()
+        self._table.hideColumn(2)
         for row in range(self._table.rowCount()):
-            self._table.setItem(row, 2, QTableWidgetItem("(terenkripsi)"))
+            self._table.item(row, 2).setText("")
 
     def closeEvent(self, event) -> None:
         """Pastikan plaintext tidak tertinggal saat dialog ditutup."""

@@ -1,14 +1,12 @@
 """Halaman berkas laporan ChaCha20-Poly1305 untuk relawan dan admin."""
 
+import base64
 import hashlib
 import os
-import shutil
 import sqlite3
-import tempfile
 import uuid
 from pathlib import Path
 
-from cryptography.exceptions import InvalidTag
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -26,6 +24,7 @@ import config
 from auth import session
 from crypto import chacha_module
 from database import db, secure_store
+from ui.encrypted_downloads import EncryptedDownloads
 
 
 class FileEncryptWorker(QThread):
@@ -63,47 +62,15 @@ class FileEncryptWorker(QThread):
             self.key[:] = b"\x00" * len(self.key)
 
 
-class FileDecryptWorker(QThread):
-    """Dekripsi ke file sementara lalu pindahkan hasil utuh ke tujuan."""
-
-    def __init__(
-        self,
-        encrypted_path: Path,
-        destination: Path,
-        key: bytes,
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self.encrypted_path = encrypted_path
-        self.destination = destination
-        self.key = bytearray(key)
-        self.error = ""
-
-    def run(self) -> None:
-        temporary = self.destination.with_name(
-            f".{self.destination.name}.{uuid.uuid4().hex}.tmp"
-        )
-        try:
-            chacha_module.decrypt_file(
-                str(self.encrypted_path), str(temporary), bytes(self.key)
-            )
-            os.replace(temporary, self.destination)
-        except InvalidTag:
-            temporary.unlink(missing_ok=True)
-            self.error = "invalid_tag"
-        except (OSError, ValueError) as exc:
-            temporary.unlink(missing_ok=True)
-            self.error = str(exc)
-        finally:
-            self.key[:] = b"\x00" * len(self.key)
-
-
 class FilesPage(QWidget):
     """Relawan mengunggah; hanya admin dapat mengunduh dan mendekripsi."""
 
     dashboard_requested = Signal()
     _columns = ("ID", "Nama asli", "Ukuran", "Pengunggah", "Waktu")
-    _allowed_extensions = {".docx", ".pptx", ".pdf", ".xlsx"}
+    _allowed_extensions = (
+        ".docx", ".pptx", ".pdf", ".xlsx",
+        ".mp4", ".mov", ".mkv", ".avi", ".webm",
+    )
 
     def __init__(
         self, conn: sqlite3.Connection, parent: QWidget | None = None
@@ -118,9 +85,6 @@ class FilesPage(QWidget):
         self._files: list[dict] = []
         self._worker: QThread | None = None
         self._pending_upload: tuple[Path, Path] | None = None
-        self._pending_download_id: int | None = None
-        self._decrypted_file_id: int | None = None
-        self._decrypted_file_cache: dict[int, Path] = {}
         self._cancelled = False
 
         self.setStyleSheet(
@@ -133,6 +97,10 @@ class FilesPage(QWidget):
 
         self.table = QTableWidget(0, len(self._columns) + 1)
         self.table.setHorizontalHeaderLabels([*self._columns, "Aksi"])
+        if self._role == "admin":
+            header = self.table.horizontalHeaderItem(1)
+            header.setText("Ciphertext berkas (Base64)")
+            header.setToolTip("Menampilkan hingga 48 byte pertama ciphertext dari isi berkas.")
         self.table.setColumnHidden(0, True)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -144,6 +112,11 @@ class FilesPage(QWidget):
         self.delete_button = QPushButton("Hapus")
         self.delete_button.clicked.connect(self.delete_selected_file)
         self.status_label = QLabel()
+        self.downloads = EncryptedDownloads(self, conn, self._user_id, lambda: self._authorized("admin"))
+        self.downloads.status.connect(self.status_label.setText)
+        self.open_button = QPushButton("Buka Berkas Terenkripsi")
+        self.open_button.clicked.connect(self.downloads.choose_and_decrypt)
+        self.open_button.setVisible(self._role == "admin")
         self.back_button = QPushButton("Kembali ke Dashboard")
         self.back_button.clicked.connect(self.dashboard_requested.emit)
         self.logout_button = QPushButton("Logout")
@@ -153,6 +126,10 @@ class FilesPage(QWidget):
         if self._role == "relawan":
             actions.addWidget(self.upload_button)
         if self._role == "admin":
+            self.preview_button = QPushButton("Pratinjau")
+            self.preview_button.clicked.connect(self.preview_selected)
+            actions.addWidget(self.preview_button)
+            actions.addWidget(self.open_button)
             actions.addWidget(self.delete_button)
         actions.addStretch()
         actions.addWidget(self.back_button)
@@ -181,11 +158,12 @@ class FilesPage(QWidget):
 
     def choose_and_upload(self) -> None:
         """Pilih file sumber; salinan terenkripsi disimpan memakai nama UUID."""
+        patterns = " ".join(f"*{extension}" for extension in self._allowed_extensions)
         source, _ = QFileDialog.getOpenFileName(
             self,
             "Pilih berkas laporan",
             "",
-            "Dokumen (*.docx *.pptx *.pdf *.xlsx)",
+            f"Dokumen dan video ({patterns})",
         )
         if source:
             self.upload_file(Path(source))
@@ -202,9 +180,9 @@ class FilesPage(QWidget):
         try:
             suffix = source_path.suffix.lower()
             if suffix not in self._allowed_extensions:
+                extensions = ", ".join(self._allowed_extensions)
                 raise ValueError(
-                    "Format berkas tidak didukung. Gunakan file dengan ekstensi "
-                    ".docx, .pptx, .pdf, atau .xlsx."
+                    f"Format berkas tidak didukung. Pilih berkas dengan ekstensi {extensions}."
                 )
             if source_path.stat().st_size > config.MAX_FILE_SIZE:
                 raise ValueError("Ukuran file melebihi batas 50 MB.")
@@ -270,41 +248,34 @@ class FilesPage(QWidget):
         self.refresh()
         self.status_label.setText("Berkas berhasil dienkripsi dan disimpan.")
 
-    def _sync_download_access(self) -> None:
-        """Admin hanya bisa men-download file setelah data itu didekripsi secara eksplisit."""
-        return
-
-    def choose_and_download(self) -> None:
-        """Minta tujuan output untuk berkas terpilih; admin-only."""
+    def _admin_report(self, file_id: int | None) -> tuple[Path, str] | None:
+        """Ambil sumber terenkripsi dan nama tampilan milik baris yang dipilih."""
         if not self._authorized("admin"):
             return
-        row = self.table.currentRow()
-        if row < 0:
-            QMessageBox.information(self, "Unduh berkas", "Pilih berkas terlebih dahulu.")
-            return
-        file_id = int(self.table.item(row, 0).text())
-        if self._decrypted_file_id != file_id:
-            QMessageBox.warning(
-                self,
-                "Dekripsi dibutuhkan",
-                "Berkas harus didekripsi terlebih dahulu sebelum bisa diunduh.",
-            )
-            return
-        source_path = self._decrypted_file_cache.get(file_id)
-        if source_path is None or not source_path.exists():
-            QMessageBox.warning(
-                self,
-                "File belum siap",
-                "File hasil dekripsi belum tersedia. Klik Decrypt dulu untuk menyiapkan data.",
-            )
-            return
-        metadata = next(item for item in self._files if item["id"] == file_id)
-        destination, _ = QFileDialog.getSaveFileName(
-            self, "Simpan berkas terdekripsi", str(metadata["nama_asli"])
-        )
-        if destination:
-            shutil.copy2(source_path, destination)
-            self.status_label.setText(f"Berkas disimpan ke {Path(destination).name}.")
+        if file_id is None:
+            row_index = self.table.currentRow()
+            if row_index < 0:
+                QMessageBox.information(self, "Berkas laporan", "Pilih berkas terlebih dahulu.")
+                return
+            file_id = int(self.table.item(row_index, 0).text())
+        try:
+            row = secure_store.get_file_for_admin(self._conn, self._user_id, file_id)
+            if row is None:
+                raise ValueError("Catatan berkas tidak ditemukan.")
+            return self._stored_file_path(row["path_enc"]), row["nama_asli"]
+        except (PermissionError, OSError, sqlite3.Error, ValueError) as exc:
+            QMessageBox.warning(self, "Gagal membaca berkas", str(exc))
+            return None
+
+    def choose_and_download(self, file_id: int | None = None) -> None:
+        report = self._admin_report(file_id)
+        if report is not None:
+            self.downloads.download(*report)
+
+    def preview_selected(self) -> None:
+        report = self._admin_report(None)
+        if report is not None:
+            self.downloads.show_preview(*report)
 
     def delete_selected_file(self) -> None:
         """Hapus berkas yang dipilih dengan konfirmasi dan bersihkan file terenkripsi."""
@@ -335,104 +306,16 @@ class FilesPage(QWidget):
                 file_id=file_id,
             )
             encrypted_path.unlink(missing_ok=True)
-            self._decrypted_file_cache.pop(file_id, None)
-            self._decrypted_file_id = None
             self.status_label.setText("Berkas berhasil dihapus.")
             self.refresh()
         except (PermissionError, ValueError, sqlite3.Error, OSError) as exc:
             QMessageBox.critical(self, "Gagal menghapus berkas", str(exc))
 
-    def _decrypt_selected_file(self, file_id: int) -> None:
-        """Dekripsi file ke lokasi sementara agar admin bisa melihat nama asli sebelum unduh."""
-        if not self._authorized("admin"):
-            return
-        metadata = next(item for item in self._files if item["id"] == file_id)
-        temp_dir = Path(tempfile.gettempdir()) / "safe_relief_decrypt"
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        temp_destination = temp_dir / f"{uuid.uuid4().hex}_{metadata['nama_asli']}"
-        self._decrypted_file_cache[file_id] = temp_destination
-        self.decrypt_file(file_id, temp_destination)
-
     def decrypt_file(self, file_id: int, destination: Path) -> None:
-        """Dekripsi berkas terpilih secara aman; hanya admin boleh memanggilnya."""
-        if not self._authorized("admin"):
-            return
-        if self._worker is not None:
-            return
-        try:
-            file_row = secure_store.get_file_for_admin(
-                self._conn, self._user_id, file_id
-            )
-            if file_row is None:
-                raise ValueError("Catatan berkas tidak ditemukan.")
-            encrypted_path = self._stored_file_path(str(file_row["path_enc"]))
-            if not encrypted_path.is_file():
-                raise FileNotFoundError("File terenkripsi tidak ditemukan di storage.")
-            if encrypted_path.resolve() == destination.resolve():
-                raise ValueError("Tujuan dekripsi tidak boleh menimpa file terenkripsi.")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            worker = FileDecryptWorker(
-                encrypted_path,
-                destination,
-                session.get_derived_key(config.HKDF_LABEL_FILE),
-                self,
-            )
-        except (PermissionError, OSError, RuntimeError, ValueError) as exc:
-            QMessageBox.critical(self, "Gagal menyiapkan dekripsi", str(exc))
-            return
-
-        self._pending_download_id = file_id
-        self._decrypted_file_id = file_id
-        worker.finished.connect(self._download_finished)
-        self._worker = worker
-        worker.start()
-
-    def _download_finished(self) -> None:
-        worker = self._worker
-        file_id = self._pending_download_id
-        self._pending_download_id = None
-        self._worker = None
-        if worker is not None:
-            worker.deleteLater()
-        if self._cancelled:
-            if isinstance(worker, FileDecryptWorker):
-                worker.destination.unlink(missing_ok=True)
-            return
-        if not self._authorized("admin"):
-            if isinstance(worker, FileDecryptWorker):
-                worker.destination.unlink(missing_ok=True)
-            return
-        error = (
-            worker.error
-            if isinstance(worker, FileDecryptWorker)
-            else "Hasil worker dekripsi tidak tersedia."
-        )
-        if error == "invalid_tag":
-            message = "File rusak atau telah diubah."
-            try:
-                secure_store.log_activity(
-                    self._conn,
-                    "FILE_DECRYPT_FAILED",
-                    user_id=self._user_id,
-                    detail=f"file_id={file_id}",
-                )
-            except sqlite3.Error as exc:
-                message += f" Gagal mencatat event: {exc}"
-            self._decrypted_file_id = None
-            self._decrypted_file_cache.pop(file_id, None)
-            self.status_label.setText(message)
-            QMessageBox.critical(self, "Dekripsi gagal", message)
-            self.refresh()
-        elif error:
-            self._decrypted_file_id = None
-            self._decrypted_file_cache.pop(file_id, None)
-            self.status_label.setText(error)
-            QMessageBox.critical(self, "Dekripsi gagal", error)
-            self.refresh()
-        else:
-            self._decrypted_file_id = file_id
-            self.status_label.setText("Berkas berhasil didekripsi. Klik Unduh untuk menyalin ke lokasi pilihan.")
-            self.refresh()
+        """Pulihkan berkas terdaftar ke tujuan yang dipilih admin."""
+        report = self._admin_report(file_id)
+        if report is not None:
+            self.downloads.decrypt(report[0], destination)
 
     def refresh(self) -> None:
         """Muat daftar berkas sesuai hak akses peran aktif."""
@@ -452,34 +335,30 @@ class FilesPage(QWidget):
         for file_row in self._files:
             row = self.table.rowCount()
             self.table.insertRow(row)
-            if self._role == "admin":
-                is_decrypted = int(file_row["id"]) == int(self._decrypted_file_id or -1)
-                name_value = file_row["nama_asli"] if is_decrypted else "[terenkripsi]"
-                action_label = "Unduh" if is_decrypted else "Decrypt"
-            else:
-                name_value = file_row["nama_asli"]
-                action_label = "-"
+            file_label = (
+                self._ciphertext_preview(file_row["path_enc"])
+                if self._role == "admin" else file_row["nama_asli"]
+            )
             values = (
                 file_row["id"],
-                name_value,
+                file_label,
                 f"{int(file_row['ukuran'])} byte",
                 users.get(file_row.get("uploader_id"), "-"),
                 file_row["created_at"],
             )
             for column, value in enumerate(values):
-                self.table.setItem(row, column, QTableWidgetItem(str(value)))
+                item = QTableWidgetItem(str(value))
+                if self._role == "admin" and column == 1:
+                    item.setToolTip(item.text())
+                self.table.setItem(row, column, item)
             if self._role == "admin":
-                action = QPushButton(action_label)
+                action = QPushButton("Unduh")
                 action.clicked.connect(
-                    lambda _checked=False, file_id=int(file_row["id"]): (
-                        self._decrypt_selected_file(file_id)
-                        if self._decrypted_file_id != file_id
-                        else self.choose_and_download()
-                    )
+                    lambda _checked=False, file_id=int(file_row["id"]): self.choose_and_download(file_id)
                 )
                 self.table.setCellWidget(row, 5, action)
         self.table.resizeColumnsToContents()
-        self._sync_download_access()
+
     @staticmethod
     def _stored_file_path(filename: str) -> Path:
         """Jangan izinkan path di database keluar dari folder storage."""
@@ -490,8 +369,26 @@ class FilesPage(QWidget):
             raise ValueError("Path file di database tidak valid.")
         return candidate
 
+    @classmethod
+    def _ciphertext_preview(cls, filename: str) -> str:
+        """Lewati nonce dan tag agar sel hanya memuat ciphertext isi berkas."""
+        try:
+            with cls._stored_file_path(filename).open("rb") as stream:
+                size = stream.seek(0, os.SEEK_END) - config.CHACHA20_NONCE_LENGTH - 16
+                if size < 0:
+                    return "Format .enc tidak lengkap"
+                if size == 0:
+                    return "Berkas kosong"
+                stream.seek(config.CHACHA20_NONCE_LENGTH)
+                prefix = stream.read(min(size, 48))
+        except (OSError, ValueError, RuntimeError):
+            return "Berkas tidak tersedia"
+        encoded = base64.b64encode(prefix).decode("ascii")
+        return encoded + ("…" if size > len(prefix) else "")
+
     def stop_worker(self, *, cancel_pending: bool = False) -> None:
         """Tunggu enkripsi/dekripsi berkas sebelum jendela aplikasi ditutup."""
+        self.downloads.stop(cancel_pending=cancel_pending)
         self._cancelled = cancel_pending
         if self._worker is not None and self._worker.isRunning():
             self._worker.wait()
@@ -500,12 +397,6 @@ class FilesPage(QWidget):
                 _source, encrypted_path = self._pending_upload
                 encrypted_path.unlink(missing_ok=True)
                 self._pending_upload = None
-            if (
-                isinstance(self._worker, FileDecryptWorker)
-                and self._worker.destination.exists()
-            ):
-                self._worker.destination.unlink()
-            self._pending_download_id = None
 
     def _authorized(self, required_role: str | None = None) -> bool:
         """Tolak aksi jika akun diblokir atau widget berasal dari sesi lama."""

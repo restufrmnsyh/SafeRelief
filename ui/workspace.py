@@ -22,7 +22,7 @@ PAGE_INFO = {
     "volunteers": ("Manajemen Relawan", "Kelola akun, status akses, wajah, dan dongle relawan.", "Belum ada relawan. Gunakan Tambah Relawan untuk mendaftarkan akun.", 0),
     "posko": ("Manajemen Posko", "Kelola lokasi posko dan lihat jumlah korban serta relawan terkait.", "Belum ada posko. Gunakan Tambah Posko untuk mulai mendata.", 0),
     "chat": ("Chat Koordinasi", "Pilih percakapan dan buka pesan melalui tombol Decrypt.", "", 0),
-    "photos": ("Dokumentasi Foto", "Kelola dokumentasi lapangan dan metadata foto.", "Belum ada foto. Dokumentasi yang diunggah relawan akan tampil di sini.", 3),
+    "photos": ("Dokumentasi Foto", "Lihat dokumentasi foto dari lapangan.", "Belum ada foto. Dokumentasi yang diunggah relawan akan tampil di sini.", 3),
     "files": ("Berkas Laporan", "Kelola dokumen laporan yang dikirim dari lapangan.", "Belum ada laporan. Berkas yang diunggah relawan akan tampil di sini.", 1),
     "aid": ("Distribusi Bantuan", "Tinjau riwayat bantuan dan hasil validasi chain.", "Belum ada riwayat distribusi bantuan.", 2),
     "activity": ("Log Aktivitas", "Telusuri aktivitas berdasarkan pengguna dan jenis tindakan.", "Belum ada aktivitas atau tidak ada hasil yang cocok dengan filter.", 3),
@@ -101,9 +101,9 @@ def _arrange_sections(owner: QWidget, current: str, layout: QVBoxLayout) -> None
     if current != "photos" and not (current == "aid" and owner._role == "admin"):
         return
     items = [layout.takeAt(0) for _ in range(layout.count())]
-    actions = next(item.layout() for item in items if isinstance(item.layout(), QHBoxLayout))
-    actions.setParent(None)
     if current == "aid":
+        actions = next(item.layout() for item in items if isinstance(item.layout(), QHBoxLayout))
+        actions.setParent(None)
         columns = QHBoxLayout()
         form = QVBoxLayout()
         form.addWidget(label("Catat distribusi", "sectionTitle"))
@@ -130,15 +130,19 @@ def _arrange_sections(owner: QWidget, current: str, layout: QVBoxLayout) -> None
     gallery = QVBoxLayout()
     gallery.addWidget(label("Daftar dokumentasi", "sectionTitle"))
     gallery.addWidget(owner.table, 1)
-    gallery.addLayout(actions)
+    for item in items:
+        if isinstance(item.layout(), QHBoxLayout):
+            item.layout().setParent(None)
+            gallery.addLayout(item.layout())
     gallery.addWidget(owner.status_label)
     preview = QVBoxLayout()
     preview.addWidget(label("Preview foto", "sectionTitle"))
     owner.image_view.setMinimumWidth(0)
     owner.image_view.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
     preview.addWidget(owner.image_view, 1)
-    preview.addWidget(label("Metadata foto", "sectionTitle"))
-    preview.addWidget(owner.metadata_view)
+    if owner.metadata_view is not None:
+        preview.addWidget(label("Metadata foto", "sectionTitle"))
+        preview.addWidget(owner.metadata_view)
     columns.addLayout(gallery, 2)
     columns.addLayout(preview, 1)
     layout.addLayout(columns, 1)
