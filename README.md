@@ -51,9 +51,7 @@ cd SafeRelief
 pip install -r requirements.txt
 ```
 
-3. Unduh model ONNX untuk face recognition dan letakkan di folder `models/`:
-   - `face_detection_yunet_2023mar.onnx`
-   - `face_recognition_sface_2021dec.onnx`
+3. Jalankan `python -X utf8 download_models.py` untuk melengkapi model wajah dan tangan di `models/`. Setelah model tersedia, pemeriksaan kamera berjalan offline.
 
 ## 🚀 Cara Pakai
 
@@ -75,8 +73,10 @@ python app.py
 **PENTING**: Aplikasi hanya bisa dijalankan jika dongle yang valid tercolok.
 
 Saat mendaftarkan wajah atau login, pastikan hanya satu orang terlihat di kamera.
-Hadapkan wajah ke depan, tolehkan kepala sesuai petunjuk di layar, lalu kembali
-menghadap kamera. Jika wajah hilang atau kamera mendeteksi orang kedua, ulangi pemeriksaan.
+Tatap kamera dengan kotak di samping wajah dalam keadaan kosong. Saat diminta,
+angkat satu tangan di dalam kotak dengan tepat tiga jari terbuka mengarah ke atas.
+Turunkan tangan setelah petunjuk berubah.
+Jika wajah hilang atau kamera mendeteksi orang kedua, ulangi pemeriksaan.
 
 ## 📁 Struktur Proyek
 
@@ -138,7 +138,7 @@ pytest tests/test_db.py -v
 ### Keterbatasan
 
 - LSB rapuh terhadap kompresi gambar
-- Tantangan gerakan kepala membantu menolak foto diam. Kamera RGB memiliki keterbatasan terhadap rekaman video dan wajah sintetis.
+- Selama tantangan tiga jari, model anti-spoof juga menilai area wajah. Kamera RGB dapat salah mengklasifikasikan wajah atau foto, terutama jika pencahayaan buruk.
 - Vigenère lemah secara kriptanalisis (hanya lapisan demonstrasi)
 - Vernam bukan OTP murni: keystream pseudo-acak dari HKDF tidak memberi perfect secrecy
 - Nonce 16 byte wajib unik untuk setiap pesan; reuse keystream memungkinkan two-time-pad attack

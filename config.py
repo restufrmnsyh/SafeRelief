@@ -21,6 +21,8 @@ STORAGE_DIR = BASE_DIR / "storage"
 MODELS_DIR = BASE_DIR / "models"
 YUNET_MODEL = MODELS_DIR / "face_detection_yunet_2023mar.onnx"
 SFACE_MODEL = MODELS_DIR / "face_recognition_sface_2021dec.onnx"
+HAND_MODEL = MODELS_DIR / "handpose_estimation_mediapipe_2023feb.onnx"
+FACE_ANTISPOOF_MODEL = MODELS_DIR / "anti-spoof-mn3.onnx"
 
 # ===== Blockchain =====
 # Difficulty: jumlah leading zeros di hash SHA-256

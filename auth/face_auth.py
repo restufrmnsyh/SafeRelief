@@ -16,7 +16,7 @@ Kenapa YuNet + SFace:
 - Tidak perlu library face_recognition yang butuh dlib/cmake
 
 Keterbatasan (untuk laporan):
-- Aplikasi meminta gerakan kepala acak. Kamera RGB tidak mengukur kedalaman.
+- Pose tiga jari disertai pemeriksaan wajah hidup. Kamera RGB tidak mengukur kedalaman.
 - Embedding tidak dienkripsi saat di RAM (hanya saat disimpan ke DB)
 - Threshold 0.363 default dari paper SFace; butuh kalibrasi per lingkungan
 
@@ -107,7 +107,7 @@ def _get_recognizer() -> cv2.FaceRecognizerSF:
 # ──────────────────────────────────────────────────────────────────────
 
 def observe_face(frame: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
-    """Ambil embedding dan landmark dari deteksi yang sama. Tolak wajah ganda."""
+    """Ambil embedding dan kotak dari wajah yang sama. Tolak wajah ganda."""
     detector = _get_detector()
     h, w = frame.shape[:2]
     detector.setInputSize((w, h))
@@ -120,40 +120,13 @@ def observe_face(frame: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
     face = faces[0]
     recognizer = _get_recognizer()
     aligned = recognizer.alignCrop(frame, face)
-    return recognizer.feature(aligned).flatten(), face[4:14].reshape(5, 2).copy()
+    return recognizer.feature(aligned).flatten(), face[:4].copy()
 
 
 def _detect_and_embed(frame: np.ndarray) -> Optional[np.ndarray]:
     """Ekstrak embedding satu frame untuk alat diagnostik."""
     observation = observe_face(frame)
     return None if observation is None else observation[0]
-
-
-def head_turn(landmarks: np.ndarray) -> float:
-    """Posisi hidung pada sumbu mata, positif ke kanan pada pratinjau kamera."""
-    right_eye, left_eye, nose = landmarks[:3]
-    eye_axis = left_eye - right_eye
-    span_squared = float(eye_axis @ eye_axis)
-    if not np.isfinite(landmarks).all() or span_squared < 20 ** 2:
-        raise ValueError("Dekatkan wajah dan pastikan kedua mata terlihat, lalu ulangi.")
-    # Rasio ini tetap saat seluruh gambar bergeser, berputar, atau berubah ukuran.
-    return float((nose - (right_eye + left_eye) / 2) @ eye_axis / span_squared)
-
-
-def nose_parallax(frontal: np.ndarray, current: np.ndarray) -> float:
-    """Ukur pergeseran hidung yang tidak dijelaskan oleh gerakan satu bidang datar."""
-    # Mata dan sudut mulut mengapit hidung. Proyeksikan lokasi hidung seandainya
-    # semua titik tercetak pada bidang yang sama, lalu bandingkan dengan deteksi.
-    corners = [0, 1, 4, 3]
-    before = frontal[corners].astype(np.float32)
-    after = current[corners].astype(np.float32)
-    if not cv2.isContourConvex(before) or not cv2.isContourConvex(after):
-        return 0.0
-    transform = cv2.getPerspectiveTransform(before, after)
-    nose = frontal[2].astype(np.float32).reshape(1, 1, 2)
-    projected = cv2.perspectiveTransform(nose, transform)[0, 0]
-    eye_axis = current[1] - current[0]
-    return float((current[2] - projected) @ eye_axis / (eye_axis @ eye_axis))
 
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:

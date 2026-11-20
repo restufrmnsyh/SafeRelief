@@ -15,7 +15,7 @@ from auth import dongle, face_auth, session
 from crypto import hashing, keys
 from database import db, secure_store
 from tests.test_workspace import workspace_app
-from tests.face_camera import observe_pose, stream_poses
+from tests.face_camera import mock_hand_camera, observe_pose, stream_poses
 from ui.login_page import LoginPage
 
 
@@ -133,6 +133,7 @@ def test_account_action_preserves_authentication_order(
         if outcome == "existing_face":
             # Tombol harus menjalankan worker, bukan sekadar mengubah tampilannya.
             monkeypatch.setattr(face_auth, "observe_face", observe_pose)
+            mock_hand_camera(monkeypatch)
             page._stored_encoding = -page._stored_encoding
             page._last_frame = np.zeros((32, 32, 3), dtype=np.uint8)
             page.verify_face_button.setFocus()

@@ -5,11 +5,11 @@ from __future__ import annotations
 import cv2
 import numpy as np
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout
 
 from ui.login_page import CameraWorker
-from ui.face_capture_worker import FaceCaptureWorker
+from ui.face_capture_worker import FaceCaptureWorker, camera_preview
 from ui.workspace import style_dialog
 
 
@@ -93,12 +93,7 @@ class FaceEnrollmentDialog(QDialog):
             return
         if self._capture_worker is not None:
             self._capture_worker.submit_frame(self._qimage_to_bgr(image), captured_at)
-        pixmap = QPixmap.fromImage(image).scaled(
-            self.camera_label.contentsRect().size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self.camera_label.setPixmap(pixmap)
+        self.camera_label.setPixmap(camera_preview(image, self.camera_label.contentsRect().size(), self._capture_worker))
 
     @staticmethod
     def _qimage_to_bgr(image: QImage) -> np.ndarray:

@@ -353,6 +353,8 @@ class TestDetectAndEmbed:
         assert result is not None
         assert result.shape == (128,)
         np.testing.assert_array_equal(result, expected.flatten())
+        _, box = face_auth.observe_face(frame)
+        np.testing.assert_array_equal(box, fake_face[0, :4])
 
     def test_two_faces_rejected_before_recognition(self, monkeypatch):
         detector, recognizer = self._make_mocks(np.ones((2, 15), dtype=np.float32), None)
@@ -361,15 +363,3 @@ class TestDetectAndEmbed:
         with pytest.raises(ValueError, match="lebih dari satu wajah"):
             face_auth.observe_face(np.zeros((240, 320, 3), dtype=np.uint8))
         recognizer.alignCrop.assert_not_called()
-
-
-def test_planar_motion_has_no_nose_parallax():
-    """Landmark pada satu bidang datar tetap konsisten di bawah transformasi perspektif."""
-    import cv2
-    from tests.face_camera import observe_pose
-
-    _, points = observe_pose(np.full((1, 1, 3), 128, dtype=np.uint8))
-    transform = np.array([[1.1, 0.7, 10], [0.1, 1.2, 15], [0.001, 0, 1]])
-    moved = cv2.perspectiveTransform(points.reshape(1, 5, 2), transform)[0]
-    assert abs(face_auth.head_turn(moved)) > 0.30
-    assert abs(face_auth.nose_parallax(points, moved)) < 1e-5

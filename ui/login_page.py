@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 from cryptography.exceptions import InvalidTag
 from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtGui import QImage, QKeySequence, QPixmap, QResizeEvent, QShortcut
+from PySide6.QtGui import QImage, QKeySequence, QResizeEvent, QShortcut
 from PySide6.QtWidgets import (
     QBoxLayout,
     QFrame,
@@ -24,7 +24,7 @@ import config
 from auth import dongle, face_auth, login, session
 from crypto import keys
 from database import db, secure_store
-from ui.face_capture_worker import FaceCaptureWorker
+from ui.face_capture_worker import FaceCaptureWorker, camera_preview
 from ui.login_style import LOGIN_STYLE
 
 
@@ -318,12 +318,7 @@ class LoginPage(QWidget):
         self._last_frame = frame
         if self._capture_worker is not None:
             self._capture_worker.submit_frame(frame, captured_at)
-        pixmap = QPixmap.fromImage(image).scaled(
-            self.camera_label.contentsRect().size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self.camera_label.setPixmap(pixmap)
+        self.camera_label.setPixmap(camera_preview(image, self.camera_label.contentsRect().size(), self._capture_worker))
 
     @staticmethod
     def _qimage_to_bgr(image: QImage) -> np.ndarray:
@@ -362,11 +357,7 @@ class LoginPage(QWidget):
             rgb = cv2.cvtColor(self._last_frame, cv2.COLOR_BGR2RGB)
             image = QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0], QImage.Format.Format_RGB888)
             self.camera_label.setPixmap(
-                QPixmap.fromImage(image).scaled(
-                    self.camera_label.contentsRect().size(),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
+                camera_preview(image, self.camera_label.contentsRect().size(), self._capture_worker)
             )
 
     def verify_current_face(self) -> None:
@@ -458,7 +449,7 @@ class LoginPage(QWidget):
         else:
             self.verify_face_button.setText("Verifikasi Wajah")
             self.face_title.setText("Verifikasi wajah")
-        self.camera_hint.setText("Ikuti petunjuk gerakan setelah menekan tombol.")
+        self.camera_hint.setText("Tatap kamera. Angkat tiga jari saat diminta.")
         self.verify_face_button.setEnabled(True)
 
     def _clear_pre_auth(self) -> None:

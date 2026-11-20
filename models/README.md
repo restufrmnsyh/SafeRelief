@@ -1,13 +1,15 @@
-# Model ONNX untuk Face Recognition
+# Model ONNX untuk wajah dan tangan
 
-Folder ini berisi model ONNX yang diperlukan untuk fitur pengenalan wajah.
+SafeRelief menjalankan keempat model secara lokal saat pendaftaran dan login.
 
 ## Status
 
-| File | Ukuran | Status |
+| File | Ukuran | Fungsi |
 |------|--------|--------|
-| `face_detection_yunet_2023mar.onnx` | ~227 KB | **Sudah tersedia** |
-| `face_recognition_sface_2021dec.onnx` | ~37 MB | **Perlu diunduh manual** |
+| `face_detection_yunet_2023mar.onnx` | ~227 KB | Menghitung dan mencari posisi wajah |
+| `face_recognition_sface_2021dec.onnx` | ~37 MB | Membuat embedding untuk pencocokan identitas |
+| `handpose_estimation_mediapipe_2023feb.onnx` | ~4 MB | Mengukur 21 titik pada tangan di kotak pratinjau |
+| `anti-spoof-mn3.onnx` | ~12 MB | Memeriksa wajah yang dideteksi YuNet |
 
 ---
 
@@ -26,10 +28,10 @@ Simpan file ke folder `models/` di root proyek SafeRelief.
 ### Opsi 2 – Python (jalankan dari root proyek)
 
 ```bash
-python download_models.py
+python -X utf8 download_models.py
 ```
 
-Script tersebut sudah ada di root proyek dan menangani kedua model.
+Skrip ini juga mengunduh kedua model tambahan beserta lisensinya dan memeriksa checksum unduhan model tangan dan anti-spoof.
 
 ### Opsi 3 – Git LFS / clone langsung
 
@@ -71,7 +73,8 @@ YuNet OK
 
 - **YuNet**: https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet
 - **SFace**: https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface
-- **Lisensi**: Apache 2.0
+- Model tangan dan lisensi Apache 2.0 berasal dari [OpenCV Zoo](https://github.com/opencv/opencv_zoo/tree/main/models/handpose_estimation_mediapipe).
+- Model anti-spoof dan spesifikasi input berasal dari [Open Model Zoo](https://github.com/openvinotoolkit/open_model_zoo/tree/master/models/public/anti-spoof-mn3). Lisensi MIT disertakan dalam `anti-spoof-LICENSE.txt`.
 
 ## Catatan untuk Tes
 

@@ -1,18 +1,20 @@
 """
 SafeRelief - Download Model ONNX
 
-Script helper untuk mengunduh model YuNet dan SFace dari OpenCV Zoo.
+Unduh model wajah dan tangan yang dipakai saat pendaftaran dan login.
 Jalankan sekali setelah setup environment.
 
 Usage:
     python download_models.py
 """
 
+import hashlib
+import sys
 import urllib.request
 from pathlib import Path
-import sys
+from tempfile import NamedTemporaryFile
 
-def download_model(filename: str, url: str, models_dir: Path) -> bool:
+def download_model(filename: str, url: str, models_dir: Path, checksum: str = "") -> bool:
     """
     Download model file dari URL.
     
@@ -26,10 +28,20 @@ def download_model(filename: str, url: str, models_dir: Path) -> bool:
     """
     filepath = models_dir / filename
     
-    if filepath.exists():
+    def matches(path: Path) -> bool:
+        if not path.is_file() or not path.stat().st_size:
+            return False
+        if not checksum:
+            return True
+        algorithm, digest = checksum.split(":")
+        with path.open("rb") as source:
+            return hashlib.file_digest(source, algorithm).hexdigest() == digest
+
+    if matches(filepath):
         print(f"✓ {filename} sudah ada, skip download")
         return True
     
+    temporary = None
     try:
         print(f"📥 Mengunduh {filename}...")
         print(f"   URL: {url}")
@@ -43,25 +55,27 @@ def download_model(filename: str, url: str, models_dir: Path) -> bool:
                 mb_total = total_size / (1024 * 1024)
                 print(f"\r   Progress: {percent:.1f}% ({mb_downloaded:.1f}/{mb_total:.1f} MB)", end='')
         
-        urllib.request.urlretrieve(url, filepath, reporthook=report_progress)
+        with NamedTemporaryFile(dir=models_dir, delete=False) as target:
+            temporary = Path(target.name)
+        urllib.request.urlretrieve(url, temporary, reporthook=report_progress)
         print()  # New line after progress
         
         # Verifikasi file
-        if filepath.exists() and filepath.stat().st_size > 0:
+        if matches(temporary):
+            temporary.replace(filepath)
             size_mb = filepath.stat().st_size / (1024 * 1024)
             print(f"✅ {filename} berhasil diunduh ({size_mb:.1f} MB)")
             return True
         else:
-            print(f"❌ {filename} gagal diunduh (file kosong)")
-            if filepath.exists():
-                filepath.unlink()
+            print(f"❌ {filename} kosong atau checksum tidak cocok")
             return False
             
     except Exception as e:
         print(f"❌ Error saat mengunduh {filename}: {e}")
-        if filepath.exists():
-            filepath.unlink()
         return False
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 def main():
     """
@@ -76,39 +90,49 @@ def main():
     models_dir = base_dir / "models"
     models_dir.mkdir(exist_ok=True)
     
-    # Model URLs (dari OpenCV Zoo)
-    models = {
+    files = {
         "face_detection_yunet_2023mar.onnx": 
             "https://github.com/opencv/opencv_zoo/raw/master/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
         "face_recognition_sface_2021dec.onnx": 
-            "https://github.com/opencv/opencv_zoo/raw/master/models/face_recognition_sface/face_recognition_sface_2021dec.onnx"
+            "https://github.com/opencv/opencv_zoo/raw/master/models/face_recognition_sface/face_recognition_sface_2021dec.onnx",
+        "handpose_estimation_mediapipe_2023feb.onnx":
+            "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/handpose_estimation_mediapipe/handpose_estimation_mediapipe_2023feb.onnx",
+        "anti-spoof-mn3.onnx":
+            "https://storage.openvinotoolkit.org/repositories/open_model_zoo/public/2022.1/anti-spoof-mn3/anti-spoof-mn3.onnx",
+        "handpose-LICENSE.txt":
+            "https://raw.githubusercontent.com/opencv/opencv_zoo/main/models/handpose_estimation_mediapipe/LICENSE",
+        "anti-spoof-LICENSE.txt":
+            "https://raw.githubusercontent.com/kprokofi/light-weight-face-anti-spoofing/master/LICENSE",
+    }
+    checksums = {
+        "handpose_estimation_mediapipe_2023feb.onnx": "sha256:db0898ae717b76b075d9bf563af315b29562e11f8df5027a1ef07b02bef6d81c",
+        "anti-spoof-mn3.onnx": "sha384:6de4534964b723397b3e8c995cadcf43bc007cc2f9930b95ae25f76adccece5d1d4d058d0b15117b9e4a9f758424f92a",
     }
     
     # Download setiap model
     success_count = 0
-    for filename, url in models.items():
-        if download_model(filename, url, models_dir):
+    for filename, url in files.items():
+        if download_model(filename, url, models_dir, checksums.get(filename, "")):
             success_count += 1
         print()
     
     # Summary
     print("=" * 60)
-    if success_count == len(models):
-        print(f"✅ Semua model berhasil diunduh ({success_count}/{len(models)})")
+    if success_count == len(files):
+        print("✅ Model dan lisensi tersedia.")
         print()
         print("Model siap digunakan di:")
-        for filename in models.keys():
+        for filename in files:
             print(f"  - models/{filename}")
         print()
-        print("Lanjutkan dengan: python setup_admin.py")
+        print("Jalankan python app.py. Untuk instalasi baru, buat admin dengan python setup_admin.py dahulu.")
         return 0
     else:
-        print(f"⚠️  Beberapa model gagal diunduh ({success_count}/{len(models)})")
+        print(f"⚠️  Berkas tersedia: {success_count}/{len(files)}")
         print()
         print("Troubleshooting:")
         print("  1. Pastikan koneksi internet stabil")
-        print("  2. Coba download manual dari:")
-        print("     https://github.com/opencv/opencv_zoo/tree/master/models")
+        print("  2. Coba unduh ulang dari URL berkas yang gagal.")
         print("  3. Letakkan file .onnx di folder models/")
         return 1
 
