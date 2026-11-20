@@ -9,7 +9,6 @@ CREATE TABLE IF NOT EXISTS posko (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     nama        TEXT    NOT NULL,
     lokasi      TEXT    NOT NULL,
-    kapasitas   INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 

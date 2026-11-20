@@ -52,8 +52,8 @@ def dashboard_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dashboard
 
 def populate_summary(conn: sqlite3.Connection) -> None:
     """Sertakan posko kosong dan korban tanpa posko agar hitungan tidak menyesatkan."""
-    north = db.insert_posko(conn, {"nama": "Posko Uji Utara", "lokasi": "Data uji visual", "kapasitas": 80})
-    db.insert_posko(conn, {"nama": "Posko Uji Selatan", "lokasi": "Data uji visual", "kapasitas": 40})
+    north = db.insert_posko(conn, {"nama": "Posko Uji Utara", "lokasi": "Data uji visual"})
+    db.insert_posko(conn, {"nama": "Posko Uji Selatan", "lokasi": "Data uji visual"})
     for index, status in enumerate(("selamat", "selamat", "luka ringan", "luka berat", "tidak diketahui")):
         db.insert_victim(conn, {
             "kode_korban": f"VISUAL-{index}", "status": status,

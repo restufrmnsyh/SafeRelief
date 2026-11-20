@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout
 
 from ui.login_page import CameraWorker
 from ui.face_capture_worker import FaceCaptureWorker
@@ -42,7 +42,8 @@ class FaceEnrollmentDialog(QDialog):
 
         self.camera_label = QLabel("Memuat kamera...")
         self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.camera_label.setMinimumSize(320, 240)
+        self.camera_label.setFixedSize(320, 240)
+        self.camera_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.camera_label.setStyleSheet(
             "border: 2px solid #CBD5E1; border-radius: 12px; "
             "background: #F8FAFC; color: #475569;"
@@ -96,7 +97,7 @@ class FaceEnrollmentDialog(QDialog):
         self._last_frame = frame
         self._recent_frames.append(frame.copy())
         pixmap = QPixmap.fromImage(image).scaled(
-            self.camera_label.size(),
+            self.camera_label.contentsRect().size(),
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )

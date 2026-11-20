@@ -476,7 +476,7 @@ def style_dialog(dialog: QDialog) -> None:
         description = {
             "Tambah Korban": "Isi data korban dan pilih posko penempatan.",
             "Edit Data Korban": "Perbarui data korban yang dipilih.",
-            "Tambah Posko": "Tentukan nama, lokasi, dan kapasitas posko.",
+            "Tambah Posko": "Tentukan nama dan lokasi posko.",
             "Edit Posko": "Perbarui informasi posko yang dipilih.",
             "Tambah Relawan": "Isi profil dan kredensial awal sebelum pendaftaran wajah.",
             "Edit Relawan": "Perbarui profil atau reset password relawan.",

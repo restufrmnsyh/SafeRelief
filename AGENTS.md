@@ -164,7 +164,7 @@ Dijalankan sekali dari terminal. Menolak jalan jika admin sudah ada. Langkah: in
 ## 7. Skema Database (ringkas)
 
 - `users`: id, nama_lengkap, username UNIQUE, password_hash, role, posko_id, face_encoding_enc, dongle_serial UNIQUE, dongle_token_hash, wrapped_master_key, kdf_salt, failed_attempts, locked_until, is_active, created_at
-- `posko`: id, nama, lokasi, kapasitas, created_at
+- `posko`: id, nama, lokasi, created_at
 - `victims`: id, kode_korban UNIQUE, nama_panggilan, usia, gender, posko_id, status, nama_lengkap_enc, nik_enc, alamat_asal_enc, kondisi_medis_enc, kontak_keluarga_enc, catatan_enc, created_by, created_at, updated_at
 - `photos`: id, victim_id, posko_id, image_path, original_hash, keterangan, uploaded_by, created_at
 - `messages`: id, sender_id, receiver_id, ciphertext, is_read, created_at

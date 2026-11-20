@@ -46,7 +46,7 @@ def workspace_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workspace
             "role": role, "password_hash": "test-hash",
         })
         users[role] = dict(db.get_user_by_id(conn, uid))
-    post = db.insert_posko(conn, {"nama": "Posko Uji", "lokasi": "Lokasi uji", "kapasitas": 40})
+    post = db.insert_posko(conn, {"nama": "Posko Uji", "lokasi": "Lokasi uji"})
     master = os.urandom(32)
     secure_store.add_victim(conn, keys.derive_key(master, b"db"), {
         "kode_korban": "UJI-001", "nama_panggilan": "Korban Uji", "status": "selamat",

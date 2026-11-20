@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -36,13 +35,10 @@ class PoskoFormDialog(QDialog):
         self.setWindowTitle("Tambah Posko" if posko is None else "Edit Posko")
         self.name_input = QLineEdit()
         self.location_input = QLineEdit()
-        self.capacity_input = QSpinBox()
-        self.capacity_input.setRange(0, 1000000)
 
         form = QFormLayout(self)
         form.addRow("Nama posko", self.name_input)
         form.addRow("Lokasi", self.location_input)
-        form.addRow("Kapasitas", self.capacity_input)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save
@@ -55,7 +51,6 @@ class PoskoFormDialog(QDialog):
         if posko is not None:
             self.name_input.setText(str(posko.get("nama") or ""))
             self.location_input.setText(str(posko.get("lokasi") or ""))
-            self.capacity_input.setValue(int(posko.get("kapasitas") or 0))
         style_dialog(self)
 
     def values(self) -> dict[str, object]:
@@ -66,7 +61,6 @@ class PoskoFormDialog(QDialog):
         return {
             "nama": name,
             "lokasi": location,
-            "kapasitas": int(self.capacity_input.value()),
         }
 
 
@@ -92,16 +86,16 @@ class PoskoManagementPage(QWidget):
         self.setStyleSheet(
             "QWidget { background: #edf5fb; color: #1E2A39; }"
             "QLabel { color: #1E2A39; }"
-            "QTableWidget, QLineEdit, QSpinBox, QComboBox { background: #f9fcff; border: 1px solid #dfeaf5; border-radius: 10px; }"
+            "QTableWidget, QLineEdit, QComboBox { background: #f9fcff; border: 1px solid #dfeaf5; border-radius: 10px; }"
             "QPushButton { background-color: #ffffff; color: #1E2A39; border: 1px solid #dfeaf5; border-radius: 12px; padding: 8px 12px; font-weight: 700; }"
             "QPushButton:hover { background-color: #eef7ff; border-color: #bfdcf0; }"
         )
 
-        self.table = QTableWidget(0, 6)
+        self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(
-            ("Nama", "Lokasi", "Kapasitas", "Korban terkait", "Relawan terkait", "ID")
+            ("Nama", "Lokasi", "Korban terkait", "Relawan terkait", "ID")
         )
-        self.table.setColumnHidden(5, True)
+        self.table.setColumnHidden(4, True)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(
             QTableWidget.SelectionBehavior.SelectRows
@@ -178,7 +172,6 @@ class PoskoManagementPage(QWidget):
                 values = (
                     posko["nama"],
                     posko["lokasi"],
-                    posko["kapasitas"],
                     posko["victim_count"],
                     posko["volunteer_count"],
                     posko_id,
@@ -205,7 +198,7 @@ class PoskoManagementPage(QWidget):
                 "Pilih posko terlebih dahulu.",
             )
             return None
-        posko_id = int(self.table.item(row, 5).text())
+        posko_id = int(self.table.item(row, 4).text())
         return next(
             (item for item in secure_store.list_admin_posko(self._conn, self._user_id)
              if int(item["id"]) == posko_id),
@@ -230,7 +223,7 @@ class PoskoManagementPage(QWidget):
             QMessageBox.critical(self, "Gagal menambah posko", str(exc))
 
     def edit_posko(self) -> None:
-        """Ubah nama, lokasi, dan kapasitas posko yang terpilih."""
+        """Ubah nama dan lokasi posko yang terpilih."""
         try:
             posko = self._selected_posko()
             if posko is None:
@@ -247,7 +240,6 @@ class PoskoManagementPage(QWidget):
                 {
                     "nama": values["nama"],
                     "lokasi": values["lokasi"],
-                    "kapasitas": values["kapasitas"],
                 },
             )
             self.status_label.setText(

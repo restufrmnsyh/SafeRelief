@@ -299,8 +299,8 @@ def insert_posko(
 ) -> int:
     """Sisipkan posko baru. Mengembalikan id."""
     cur = conn.execute(
-        "INSERT INTO posko (nama, lokasi, kapasitas) VALUES (?, ?, ?)",
-        (data["nama"], data["lokasi"], data.get("kapasitas", 0)),
+        "INSERT INTO posko (nama, lokasi) VALUES (?, ?)",
+        (data["nama"], data["lokasi"]),
     )
     if commit:
         conn.commit()
@@ -337,8 +337,8 @@ def update_posko(
 ) -> None:
     """Perbarui kolom dasar posko tanpa menyentuh data sensitif lain."""
     conn.execute(
-        "UPDATE posko SET nama = ?, lokasi = ?, kapasitas = ? WHERE id = ?",
-        (data["nama"], data["lokasi"], data.get("kapasitas", 0), posko_id),
+        "UPDATE posko SET nama = ?, lokasi = ? WHERE id = ?",
+        (data["nama"], data["lokasi"], posko_id),
     )
     if commit:
         conn.commit()

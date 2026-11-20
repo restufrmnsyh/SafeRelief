@@ -43,7 +43,7 @@ def posko_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, qapp):
     )
     posko_id = db.insert_posko(
         conn,
-        {"nama": "Posko A", "lokasi": "Lokasi A", "kapasitas": 50},
+        {"nama": "Posko A", "lokasi": "Lokasi A"},
     )
     db.insert_user(
         conn,
@@ -80,6 +80,11 @@ def test_posko_admin_can_add_edit_and_delete_records(
 
     page = PoskoManagementPage(conn)
     assert page.table.rowCount() >= 1
+    assert [
+        page.table.horizontalHeaderItem(column).text()
+        for column in range(page.table.columnCount())
+    ] == ["Nama", "Lokasi", "Korban terkait", "Relawan terkait", "ID"]
+    assert page.table.isColumnHidden(4)
     assert any(str(row[0]) == "Posko A" for row in [
         (
             page.table.item(r, 0).text(),
@@ -93,19 +98,24 @@ def test_posko_admin_can_add_edit_and_delete_records(
     monkeypatch.setattr(
         PoskoFormDialog,
         "values",
-        lambda self: {"nama": "Posko Baru", "lokasi": "Lokasi Baru", "kapasitas": 20},
+        lambda self: {"nama": "Posko Baru", "lokasi": "Lokasi Baru"},
     )
     page.add_posko()
-    assert db.list_posko(conn)[-1]["nama"] == "Posko Baru"
+    added_posko = db.list_posko(conn)[-1]
+    assert set(added_posko.keys()) == {"id", "nama", "lokasi", "created_at"}
+    assert added_posko["nama"] == "Posko Baru"
+    assert added_posko["lokasi"] == "Lokasi Baru"
 
     page.table.selectRow(0)
     monkeypatch.setattr(
         PoskoFormDialog,
         "values",
-        lambda self: {"nama": "Posko A Diedit", "lokasi": "Lokasi A Update", "kapasitas": 77},
+        lambda self: {"nama": "Posko A Diedit", "lokasi": "Lokasi A Update"},
     )
     page.edit_posko()
-    assert db.get_posko_by_id(conn, existing_posko_id)["nama"] == "Posko A Diedit"
+    edited_posko = db.get_posko_by_id(conn, existing_posko_id)
+    assert edited_posko["nama"] == "Posko A Diedit"
+    assert edited_posko["lokasi"] == "Lokasi A Update"
 
     page.table.selectRow(page.table.rowCount() - 1)
     monkeypatch.setattr(
@@ -179,7 +189,7 @@ def test_posko_rechecks_admin_after_dialog(
     monkeypatch.setattr(PoskoFormDialog, "exec", accept_after_blocking)
     monkeypatch.setattr(QMessageBox, "question", accept_after_blocking)
     monkeypatch.setattr(PoskoFormDialog, "values", lambda _self: {
-        "nama": "Changed", "lokasi": "Changed", "kapasitas": 10,
+        "nama": "Changed", "lokasi": "Changed",
     })
     errors: list[str] = []
     monkeypatch.setattr(QMessageBox, "critical", lambda _p, _t, text: errors.append(text))
@@ -198,7 +208,7 @@ def test_posko_logic_rejects_unauthorized_writes(posko_context, state: str) -> N
     if state == "blocked":
         db.update_user_active(conn, admin_id, 0)
         user_id = admin_id
-    data = {"nama": "Changed", "lokasi": "Changed", "kapasitas": 10}
+    data = {"nama": "Changed", "lokasi": "Changed"}
     before = [dict(row) for row in db.list_posko(conn)]
     with pytest.raises(PermissionError):
         secure_store.add_posko(conn, user_id, data)
@@ -217,8 +227,8 @@ def test_posko_counts_and_delete_confirmation_preserve_relations(
     """Pembatalan hapus menjaga korban/relawan; konfirmasi hanya melepas poskonya."""
     conn, _admin_id, _volunteer_id, posko_id = posko_context
     page = PoskoManagementPage(conn)
+    assert page.table.item(0, 2).text() == "1"
     assert page.table.item(0, 3).text() == "1"
-    assert page.table.item(0, 4).text() == "1"
     page.table.selectRow(0)
     monkeypatch.setattr(QMessageBox, "question", lambda *_a, **_k: QMessageBox.StandardButton.No)
     page.delete_posko()

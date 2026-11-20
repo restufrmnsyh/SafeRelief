@@ -67,7 +67,7 @@ def _make_user(conn, username="relawan1", role="relawan", dongle_serial=None):
 
 
 def _make_posko(conn, nama="Posko A"):
-    return db.insert_posko(conn, {"nama": nama, "lokasi": "Lokasi A", "kapasitas": 50})
+    return db.insert_posko(conn, {"nama": nama, "lokasi": "Lokasi A"})
 
 
 # ─────────────────────────────────────────────────────────────────────

@@ -49,7 +49,7 @@ def victims_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, qapp):
     )
     posko_id = db.insert_posko(
         conn,
-        {"nama": "Posko Utama", "lokasi": "Lapangan", "kapasitas": 50},
+        {"nama": "Posko Utama", "lokasi": "Lapangan"},
     )
     master_key = os.urandom(config.MASTER_KEY_LENGTH)
     session.login(

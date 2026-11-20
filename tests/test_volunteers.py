@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QSize, Qt, Signal
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication, QDialog
 
@@ -201,6 +201,30 @@ def test_failed_dongle_provision_rolls_back_volunteer(
 
     assert db.get_user_by_username(conn, "gagal") is None
     assert not (usb / config.DONGLE_KEY_FILE).exists()
+
+
+def test_face_enrollment_preview_keeps_its_size_between_frames(
+    monkeypatch: pytest.MonkeyPatch, qapp: QApplication
+) -> None:
+    monkeypatch.setattr(FaceEnrollmentDialog, "_start_camera", lambda self: None)
+    dialog = FaceEnrollmentDialog("Relawan Uji")
+    dialog.show()
+    try:
+        qapp.processEvents()
+        label = dialog.camera_label
+        geometry = label.geometry()
+        assert geometry.size() == QSize(320, 240)
+        for width, height in [(640, 480), (480, 640), (1280, 720)]:
+            image = QImage(width, height, QImage.Format.Format_RGB888)
+            image.fill(0)
+            dialog._display_frame(image)
+            qapp.processEvents()
+            assert label.geometry() == geometry
+            assert label.pixmap().size() == image.size().scaled(
+                label.contentsRect().size(), Qt.AspectRatioMode.KeepAspectRatio
+            )
+    finally:
+        dialog.close()
 
 
 def test_face_enrollment_dialog_shows_live_feed_and_captures_encoding(

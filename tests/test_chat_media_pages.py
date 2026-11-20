@@ -48,7 +48,7 @@ def media_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, qapp):
         },
     )
     posko_id = db.insert_posko(
-        conn, {"nama": "Posko A", "lokasi": "Lapangan", "kapasitas": 10}
+        conn, {"nama": "Posko A", "lokasi": "Lapangan"}
     )
     victim_id = db.insert_victim(
         conn,

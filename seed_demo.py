@@ -47,14 +47,14 @@ def seed_demo_data(
             )
 
         posko_ids = []
-        for name, location, capacity in (
-            ("Posko Demo Utara", "Wilayah fiktif Utara", 40),
-            ("Posko Demo Selatan", "Wilayah fiktif Selatan", 35),
+        for name, location in (
+            ("Posko Demo Utara", "Wilayah fiktif Utara"),
+            ("Posko Demo Selatan", "Wilayah fiktif Selatan"),
         ):
             posko_ids.append(
                 db.insert_posko(
                     conn,
-                    {"nama": name, "lokasi": location, "kapasitas": capacity},
+                    {"nama": name, "lokasi": location},
                     commit=False,
                 )
             )
