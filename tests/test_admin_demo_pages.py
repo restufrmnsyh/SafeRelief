@@ -1,5 +1,6 @@
 """Tes UI blockchain bantuan, audit log, dan panel demonstrasi."""
 
+import base64
 import os
 from pathlib import Path
 
@@ -159,16 +160,30 @@ def test_demo_panel_shows_raw_encrypted_bytes_and_decrypted_values(
     conn, _admin_id, _volunteer_id, victim_id, message_id = admin_context
     page = DemoPanelPage(conn)
     assert page.record_input.currentData() == victim_id
-    assert "Mawar Contoh" not in page.raw_view.toPlainText()
-    assert page.plaintext_view.toPlainText().find("Mawar Contoh") >= 0
-    assert "nik_enc" not in page.raw_view.toPlainText()
-    assert "nik" in page.raw_view.toPlainText()
+    table = page.comparison
+    victim = db.get_victim_by_id(conn, victim_id)
+    pairs = {
+        table.item(row, 0).text(): (table.item(row, 1).text(), table.item(row, 2).text())
+        for row in range(table.rowCount())
+    }
+    assert len(pairs) == 6
+    for caption, key, value in (("Nama lengkap", "nama_lengkap", "Mawar Contoh"), ("NIK", "nik", "123456789")):
+        encrypted, decrypted = pairs[caption]
+        assert base64.b64decode(encrypted, validate=True) == victim[f"{key}_enc"]
+        assert decrypted == value
+    assert pairs["Catatan"] == ("—", "—")
+    assert page.details.isHidden()
+    page.details_button.click()
+    assert not page.details.isHidden() and "Kode korban: K-900" in page.details.text()
 
     page.record_type.setCurrentIndex(page.record_type.findData("messages"))
     assert page.record_input.currentData() == message_id
-    assert "ciphertext_base64" in page.raw_view.toPlainText()
-    assert "Koordinasi rahasia" not in page.raw_view.toPlainText()
-    assert page.plaintext_view.toPlainText() == "Koordinasi rahasia"
+    assert table.rowCount() == 1 and table.item(0, 0).text() == "Isi pesan"
+    assert base64.b64decode(table.item(0, 1).text()) == db.get_message_by_id(conn, message_id)["ciphertext"]
+    assert table.item(0, 2).text() == "Koordinasi rahasia"
+    assert page.details.isHidden() and "K-900" not in page.details.text()
+    page.clear_sensitive_state()
+    assert table.rowCount() == 0 and page.details.text() == ""
 
     session.login(
         {"id": _volunteer_id, "username": "relawan1", "role": "relawan"},

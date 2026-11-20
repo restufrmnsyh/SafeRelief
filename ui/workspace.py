@@ -250,9 +250,8 @@ class FeatureWorkspace(QWidget):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
         for plain in owner.findChildren(QPlainTextEdit):
             plain.setMinimumHeight(min(130, plain.maximumHeight()))
-        for name in ("raw_view", "ciphertext_view"):
-            if hasattr(owner, name):
-                getattr(owner, name).setProperty("encrypted", True)
+        if hasattr(owner, "ciphertext_view"):
+            owner.ciphertext_view.setProperty("encrypted", True)
         if hasattr(owner, "image_view"):
             owner.image_view.setObjectName("photoPreview")
         for attribute, caption in {

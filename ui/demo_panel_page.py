@@ -1,18 +1,24 @@
 """Panel demonstrasi plaintext dan ciphertext untuk korban atau pesan chat."""
 
 import base64
-import json
+import re
 import sqlite3
 
 from cryptography.exceptions import InvalidTag
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QModelIndex, QSize, Qt, Signal
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
-    QPlainTextEdit,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -20,6 +26,38 @@ from PySide6.QtWidgets import (
 import config
 from auth import session
 from database import db, secure_store
+
+
+FIELD_NAMES = {
+    "nama_lengkap": "Nama lengkap", "nik": "NIK", "alamat_asal": "Alamat asal",
+    "kondisi_medis": "Kondisi medis", "kontak_keluarga": "Kontak keluarga",
+    "catatan": "Catatan", "id": "ID", "kode_korban": "Kode korban",
+    "nama_panggilan": "Nama panggilan", "usia": "Usia", "gender": "Jenis kelamin",
+    "posko_id": "ID posko", "status": "Status", "created_by": "ID pencatat",
+    "created_at": "Waktu pencatatan", "updated_at": "Terakhir diperbarui",
+    "sender_id": "ID pengirim", "receiver_id": "ID penerima",
+}
+
+
+class ValueDelegate(QStyledItemDelegate):
+    """Izinkan Qt membungkus token panjang tanpa mengubah nilai yang disalin."""
+
+    def initStyleOption(self, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        super().initStyleOption(option, index)
+        if index.column() == 1:
+            option.text = "\u200b".join(option.text[i:i + 4] for i in range(0, len(option.text), 4))
+        elif index.column() == 2:
+            option.text = re.sub(r"(\S{8})(?=\S{4})", r"\1" + "\u200b", option.text)
+
+    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
+        # Tinggi baris mengikuti ruang teks setelah padding stylesheet dikurangi.
+        if index.column() and option.widget is not None and option.rect.width() > 0:
+            option = QStyleOptionViewItem(option)
+            text_rect = option.widget.style().subElementRect(
+                QStyle.SubElement.SE_ItemViewItemText, option, option.widget
+            )
+            option.rect.setWidth(max(1, text_rect.width()))
+        return super().sizeHint(option, index)
 
 
 class DemoPanelPage(QWidget):
@@ -43,32 +81,47 @@ class DemoPanelPage(QWidget):
         self.record_type.currentIndexChanged.connect(self.refresh_records)
         self.record_input = QComboBox()
         self.record_input.currentIndexChanged.connect(self.show_selected)
-        self.raw_view = QPlainTextEdit()
-        self.raw_view.setReadOnly(True)
-        self.raw_view.setPlaceholderText("Ciphertext mentah dari database.db.")
-        self.plaintext_view = QPlainTextEdit()
-        self.plaintext_view.setReadOnly(True)
-        self.plaintext_view.setPlaceholderText(
-            "Plaintext terdekripsi dari secure_store."
-        )
-        columns = QHBoxLayout()
-        raw_column = QVBoxLayout()
-        raw_column.addWidget(QLabel("Ciphertext mentah"))
-        raw_column.addWidget(self.raw_view)
-        plain_column = QVBoxLayout()
-        plain_column.addWidget(QLabel("Hasil dekripsi"))
-        plain_column.addWidget(self.plaintext_view)
-        columns.addLayout(raw_column)
-        columns.addLayout(plain_column)
+        self.comparison = QTableWidget(0, 3)
+        self.comparison.setAccessibleName("Perbandingan ciphertext dan hasil dekripsi")
+        self.comparison.setHorizontalHeaderLabels(["Kolom", "Ciphertext (Base64)", "Hasil dekripsi"])
+        self.comparison.setItemDelegate(ValueDelegate(self.comparison))
+        self.comparison.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.comparison.setAlternatingRowColors(True)
+        self.comparison.setShowGrid(False)
+        self.comparison.setMinimumHeight(220)
+        header = self.comparison.horizontalHeader()
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        for column in (1, 2):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+        self.comparison.verticalHeader().hide()
+        self.comparison.verticalHeader().setMinimumSectionSize(42)
+        self.comparison.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        header.sectionResized.connect(self.comparison.resizeRowsToContents)
+        self.notice = QLabel()
+        self.notice.setTextFormat(Qt.TextFormat.PlainText)
+        self.notice.setWordWrap(True)
+        self.details_button = QPushButton("Rincian catatan")
+        self.details_button.setCheckable(True)
+        self.details = QLabel()
+        self.details.setTextFormat(Qt.TextFormat.PlainText)
+        self.details.setWordWrap(True)
+        self.details.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
+        self.details_button.toggled.connect(self._toggle_details)
         self.back_button = QPushButton("Kembali ke Dashboard")
         self.back_button.clicked.connect(self.dashboard_requested.emit)
         self.logout_button = QPushButton("Logout")
         self.logout_button.clicked.connect(self._confirm_logout)
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Panel Demo — Ciphertext vs Plaintext"))
-        layout.addWidget(self.record_type)
-        layout.addWidget(self.record_input)
-        layout.addLayout(columns, 1)
+        filters = QHBoxLayout()
+        filters.addWidget(self.record_type, 1)
+        filters.addWidget(self.record_input, 2)
+        layout.addLayout(filters)
+        layout.addWidget(self.notice)
+        layout.addWidget(self.comparison, 1)
+        layout.addWidget(self.details_button, alignment=Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self.details)
         layout.addWidget(self.back_button)
         layout.addWidget(self.logout_button)
         self.refresh_records()
@@ -90,11 +143,11 @@ class DemoPanelPage(QWidget):
 
     def refresh_records(self, *_signal_args: object) -> None:
         """Muat daftar metadata yang diizinkan; data terenkripsi dibaca saat pilih."""
+        self.clear_sensitive_state()
         if not self._authorized():
             return
         kind = str(self.record_type.currentData())
         self.record_input.blockSignals(True)
-        self.record_input.clear()
         if kind == "victims":
             rows = secure_store.list_demo_victims(
                 self._conn, self._user_id
@@ -114,64 +167,37 @@ class DemoPanelPage(QWidget):
                     int(message["id"]),
                 )
         self.record_input.blockSignals(False)
-        self.raw_view.clear()
-        self.plaintext_view.clear()
         if self.record_input.count():
             self.show_selected()
+        else:
+            self._reset_comparison("Belum ada data korban." if kind == "victims" else "Belum ada pesan chat.")
 
     def show_selected(self, *_signal_args: object) -> None:
-        """Baca raw row melalui db.py dan plaintext melalui secure_store."""
+        """Pasangkan setiap nilai hasil dekripsi dengan BLOB dari kolom yang sama."""
+        self._reset_comparison()
         if not self._authorized():
-            self.raw_view.clear()
-            self.plaintext_view.clear()
             return
         record_id = self.record_input.currentData()
         if record_id is None:
-            self.raw_view.setPlainText("Tidak ada record untuk ditampilkan.")
-            self.plaintext_view.clear()
             return
         kind = str(self.record_type.currentData())
         try:
             if kind == "victims":
-                raw_row = db.get_victim_by_id(self._conn, int(record_id))
-                if raw_row is None:
-                    raise ValueError("Data korban tidak ditemukan.")
-                raw_fields = {
-                    field: (
-                        base64.b64encode(bytes(raw_row[f"{field}_enc"])).decode(
-                            "ascii"
-                        )
-                        if raw_row[f"{field}_enc"] is not None
-                        else None
-                    )
-                    for field in (
-                        "nama_lengkap",
-                        "nik",
-                        "alamat_asal",
-                        "kondisi_medis",
-                        "kontak_keluarga",
-                        "catatan",
-                    )
-                }
-                raw_fields["kode_korban"] = raw_row["kode_korban"]
-                raw_fields["nama_panggilan"] = raw_row["nama_panggilan"]
+                blobs = secure_store.get_victim_ciphertext(self._conn, self._user_id, int(record_id))
                 plaintext = secure_store.get_victim(
                     self._conn,
                     session.get_derived_key(config.HKDF_LABEL_DB),
                     int(record_id),
                 )
+                if blobs is None or plaintext is None:
+                    raise ValueError("Data korban tidak ditemukan.")
+                for field, blob in blobs.items():
+                    self._add_comparison(FIELD_NAMES[field], blob, plaintext[field])
+                metadata = {key: value for key, value in plaintext.items() if key not in blobs}
             else:
                 raw_row = db.get_message_by_id(self._conn, int(record_id))
                 if raw_row is None:
                     raise ValueError("Pesan tidak ditemukan.")
-                raw_fields = {
-                    "id": raw_row["id"],
-                    "sender_id": raw_row["sender_id"],
-                    "receiver_id": raw_row["receiver_id"],
-                    "ciphertext_base64": base64.b64encode(
-                        bytes(raw_row["ciphertext"])
-                    ).decode("ascii"),
-                }
                 plaintext = secure_store.decrypt_demo_message(
                     self._conn,
                     self._user_id,
@@ -184,13 +210,14 @@ class DemoPanelPage(QWidget):
                         config.HKDF_LABEL_CHAT_MAC
                     ),
                 )
-            self.raw_view.setPlainText(
-                self._format_json(raw_fields)
-            )
-            self.plaintext_view.setPlainText(
-                self._format_json(plaintext) if isinstance(plaintext, dict)
-                else str(plaintext)
-            )
+                self._add_comparison("Isi pesan", raw_row["ciphertext"], plaintext)
+                metadata = {key: raw_row[key] for key in ("id", "sender_id", "receiver_id", "created_at")}
+            self.details.setText("\n".join(
+                f"{FIELD_NAMES[key]}: {value if value is not None else '—'}"
+                for key, value in metadata.items()
+            ))
+            self.comparison.show()
+            self.details_button.show()
         except (
             InvalidTag,
             PermissionError,
@@ -198,18 +225,36 @@ class DemoPanelPage(QWidget):
             ValueError,
             sqlite3.Error,
         ) as exc:
-            self.raw_view.setPlainText(f"Gagal membaca ciphertext: {exc}")
-            self.plaintext_view.clear()
+            self._reset_comparison("Perbandingan data tidak dapat ditampilkan.")
             QMessageBox.warning(self, "Panel Demo", str(exc))
 
-    @staticmethod
-    def _format_json(value: object) -> str:
-        return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+    def _add_comparison(self, label: str, blob: bytes | None, plaintext: str | None) -> None:
+        row = self.comparison.rowCount()
+        self.comparison.insertRow(row)
+        encoded = base64.b64encode(blob).decode("ascii") if blob is not None else "—"
+        for column, value in enumerate((label, encoded, plaintext if plaintext is not None else "—")):
+            item = QTableWidgetItem(value)
+            if column == 1:
+                item.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+            self.comparison.setItem(row, column, item)
+
+    def _toggle_details(self, expanded: bool) -> None:
+        self.details.setVisible(expanded)
+        self.details_button.setText("Tutup rincian" if expanded else "Rincian catatan")
+
+    def _reset_comparison(self, message: str = "") -> None:
+        self.comparison.setRowCount(0)
+        self.comparison.hide()
+        self.details_button.setChecked(False)
+        self.details_button.hide()
+        self.details.clear()
+        self.details.hide()
+        self.notice.setText(message)
+        self.notice.setVisible(bool(message))
 
     def clear_sensitive_state(self) -> None:
-        """Remove decrypted demo content from widgets before discarding page."""
-        self.raw_view.clear()
-        self.plaintext_view.clear()
+        """Kosongkan nilai dan pilihan catatan saat sesi admin berakhir."""
+        self._reset_comparison()
         blocked = self.record_input.blockSignals(True)
         try:
             self.record_input.clear()
