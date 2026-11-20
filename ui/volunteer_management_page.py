@@ -281,6 +281,8 @@ class VolunteerManagementPage(QWidget):
             if form.exec() != QDialog.DialogCode.Accepted:
                 return
             data = form.values()
+            if db.get_user_by_username(self._conn, str(data["username"])) is not None:
+                raise ValueError("Username tersebut sudah digunakan.")
             self._pending_volunteer = data
             self.add_button.setEnabled(False)
             self.status_label.setText(

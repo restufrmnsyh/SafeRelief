@@ -2,12 +2,13 @@
 
 import os
 from pathlib import Path
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
 from PySide6.QtCore import QObject, QSize, Qt, Signal
 from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
 
 class FakeCameraWorker(QObject):
@@ -45,6 +46,7 @@ from auth import dongle, face_auth, session, volunteers
 from crypto import keys
 from database import db, secure_store
 from ui.face_enrollment_dialog import FaceEnrollmentDialog
+from ui.volunteer_management_page import VolunteerFormDialog, VolunteerManagementPage
 
 
 @pytest.fixture(scope="session")
@@ -155,6 +157,90 @@ def test_admin_can_create_update_and_replace_volunteer_dongle(
         second_token,
         bytes(user["kdf_salt"]),
     ) == master_key
+
+
+@pytest.mark.parametrize("is_active,username", [(1, "relawan1"), (0, "relawan1"), (1, "admin")])
+def test_duplicate_username_is_reported_before_face_enrollment(
+    admin_context, monkeypatch: pytest.MonkeyPatch, qapp: QApplication,
+    is_active: int, username: str,
+) -> None:
+    """Username terpakai ditolak sebelum kamera dan penulisan dongle dimulai."""
+    conn, _ = admin_context
+    if username != "admin":
+        db.insert_user(conn, {
+            "nama_lengkap": "Relawan Satu", "username": username,
+            "password_hash": "hash-uji", "role": "relawan", "is_active": is_active,
+        })
+    before = [dict(row) for row in db.list_users(conn)]
+    monkeypatch.setattr(dongle, "find_removable_drives", lambda: ["Z:\\"])
+    camera = Mock(side_effect=AssertionError("Kamera tidak boleh dibuka untuk username duplikat."))
+    provision = Mock()
+    monkeypatch.setattr(FaceEnrollmentDialog, "__init__", camera)
+    monkeypatch.setattr(dongle, "provision_dongle", provision)
+
+    def submit_form(form: VolunteerFormDialog) -> QDialog.DialogCode:
+        form.name_input.setText("Relawan Baru")
+        form.username_input.setText(f"  {username}  ")
+        form.password_input.setText("password-awal")
+        form.confirm_password_input.setText("password-awal")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(VolunteerFormDialog, "exec", submit_form)
+    errors: list[str] = []
+    monkeypatch.setattr(QMessageBox, "critical", lambda _p, _t, text: errors.append(text))
+    page = VolunteerManagementPage(conn)
+    try:
+        page.add_button.click()
+        assert errors == ["Username tersebut sudah digunakan."]
+        camera.assert_not_called()
+        provision.assert_not_called()
+        assert [dict(row) for row in db.list_users(conn)] == before
+        assert db.list_activity_log(conn) == []
+        assert page._pending_volunteer is None
+        assert page.add_button.isEnabled()
+        assert page.status_label.text() == ""
+    finally:
+        page.close()
+        page.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("late_duplicate", [False, True])
+def test_multiple_volunteers_have_unique_usernames(
+    admin_context, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    late_duplicate: bool,
+) -> None:
+    """Pendaftaran ganda ditolak, termasuk ketika username baru dipakai saat transaksi."""
+    conn, _ = admin_context
+    monkeypatch.setattr(dongle, "_token_path", lambda drive: Path(drive) / config.DONGLE_KEY_FILE)
+    monkeypatch.setattr(dongle, "get_volume_serial", lambda drive: Path(drive).name)
+    for username in ("relawan1", "relawan2"):
+        drive = tmp_path / username
+        drive.mkdir()
+        volunteers.create_volunteer(
+            conn, nama_lengkap=username, username=username, password="password-awal",
+            posko_id=None, drive=str(drive), encoding=np.ones(128, dtype=np.float32),
+        )
+    assert len(volunteers.list_volunteers(conn)) == 2
+    before = [dict(row) for row in db.list_users(conn)]
+    logs_before = [dict(row) for row in db.list_activity_log(conn)]
+    tokens_before = {path: path.read_bytes() for path in tmp_path.glob("*/.saferelief_key")}
+    if late_duplicate:
+        existing = db.get_user_by_username(conn, "relawan1")
+        monkeypatch.setattr(db, "get_user_by_username", Mock(side_effect=[None, existing]))
+    rejected_drive = tmp_path / "rejected-usb"
+    rejected_drive.mkdir()
+    with pytest.raises(ValueError, match="Username tersebut sudah digunakan"):
+        volunteers.create_volunteer(
+            conn, nama_lengkap="Relawan Ketiga", username="  relawan1  ",
+            password="password-awal", posko_id=None, drive=str(rejected_drive),
+            encoding=np.ones(128, dtype=np.float32),
+        )
+    assert [dict(row) for row in db.list_users(conn)] == before
+    assert [dict(row) for row in db.list_activity_log(conn)] == logs_before
+    assert all(path.read_bytes() == contents for path, contents in tokens_before.items())
+    assert not list(rejected_drive.iterdir())
+    assert not conn.in_transaction
 
 
 def test_volunteer_management_requires_admin(admin_context) -> None:
