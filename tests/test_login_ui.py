@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from time import monotonic, sleep
 
 import numpy as np
 import pytest
@@ -14,6 +15,7 @@ from auth import dongle, face_auth, session
 from crypto import hashing, keys
 from database import db, secure_store
 from tests.test_workspace import workspace_app
+from tests.face_camera import observe_pose, stream_poses
 from ui.login_page import LoginPage
 
 
@@ -69,7 +71,7 @@ def test_login_reflows_and_all_controls_remain_reachable(
         assert widget.height() >= 44
     image = QImage(1920, 1080, QImage.Format.Format_RGB888)
     image.fill(Qt.GlobalColor.gray)
-    page._display_frame(image)
+    page._display_frame(image, monotonic())
     workspace_app.processEvents()
     assert page.scroll.horizontalScrollBar().maximum() == 0
     assert page.password_input.echoMode() == QLineEdit.EchoMode.Password
@@ -130,16 +132,18 @@ def test_account_action_preserves_authentication_order(
         )
         if outcome == "existing_face":
             # Tombol harus menjalankan worker, bukan sekadar mengubah tampilannya.
-            monkeypatch.setattr(face_auth, "verify_face", lambda *_args: (False, 0.4))
+            monkeypatch.setattr(face_auth, "observe_face", observe_pose)
+            page._stored_encoding = -page._stored_encoding
             page._last_frame = np.zeros((32, 32, 3), dtype=np.uint8)
             page.verify_face_button.setFocus()
             QTest.keyClick(page.verify_face_button, Qt.Key.Key_Return)
-            worker = page._face_worker
-            assert worker is not None
-            assert page.message_label.text() == "Memverifikasi wajah..."
-            worker.wait(5000)
-            for _ in range(5):
+            assert page._capture_worker is not None
+            timer = stream_poses(page, page.message_label)
+            deadline = monotonic() + 5
+            while page._capture_worker is not None and monotonic() < deadline:
                 workspace_app.processEvents()
+                sleep(0.005)
+            timer.stop()
             assert "Wajah tidak cocok" in page.message_label.text()
             assert page.verify_face_button.isEnabled()
         pending_key = page._transient_master_key

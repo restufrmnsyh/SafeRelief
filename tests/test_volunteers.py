@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from time import monotonic, sleep
 from unittest.mock import Mock
 
 import numpy as np
@@ -9,12 +10,13 @@ import pytest
 from PySide6.QtCore import QObject, QSize, Qt, Signal
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
+from tests.face_camera import observe_pose, stream_poses
 
 
 class FakeCameraWorker(QObject):
     """Worker kamera palsu untuk tes UI tanpa membuka perangkat keras."""
 
-    frame_ready = Signal(QImage)
+    frame_ready = Signal(QImage, float)
     camera_error = Signal(str)
 
     def __init__(self, parent=None):
@@ -30,7 +32,7 @@ class FakeCameraWorker(QObject):
             100 * 3,
             QImage.Format.Format_RGB888,
         )
-        self.frame_ready.emit(image)
+        self.frame_ready.emit(image, monotonic())
 
     def isRunning(self) -> bool:
         return self._running
@@ -303,7 +305,7 @@ def test_face_enrollment_preview_keeps_its_size_between_frames(
         for width, height in [(640, 480), (480, 640), (1280, 720)]:
             image = QImage(width, height, QImage.Format.Format_RGB888)
             image.fill(0)
-            dialog._display_frame(image)
+            dialog._display_frame(image, monotonic())
             qapp.processEvents()
             assert label.geometry() == geometry
             assert label.pixmap().size() == image.size().scaled(
@@ -318,10 +320,7 @@ def test_face_enrollment_dialog_shows_live_feed_and_captures_encoding(
 ) -> None:
     conn, _ = admin_context
 
-    def fake_detect(frame):
-        return np.ones(128, dtype=np.float32)
-
-    monkeypatch.setattr(face_auth, "_detect_and_embed", fake_detect)
+    monkeypatch.setattr(face_auth, "observe_face", observe_pose)
     monkeypatch.setattr(
         "ui.face_enrollment_dialog.CameraWorker",
         FakeCameraWorker,
@@ -342,11 +341,12 @@ def test_face_enrollment_dialog_shows_live_feed_and_captures_encoding(
     assert dialog.camera_label.pixmap() is not None
 
     dialog.capture_face()
-    from time import monotonic, sleep
+    timer = stream_poses(dialog, dialog.status_label)
     deadline = monotonic() + 5
     while dialog._capture_worker is not None and monotonic() < deadline:
         qapp.processEvents()
         sleep(0.005)
+    timer.stop()
     assert dialog.capture_result is not None
     assert dialog.capture_result.shape == (128,)
     assert dialog.status_label.text() == "Wajah berhasil direkam!"

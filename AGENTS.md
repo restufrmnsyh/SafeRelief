@@ -66,7 +66,7 @@ Tidak ada chat antar relawan.
 
 1. **Gerbang dongle:** aplikasi tidak menampilkan form login sebelum ada dongle valid tercolok. Pesan hanya "Dongle valid terdeteksi" (jangan bocorkan pemilik).
 2. **Username + password:** verifikasi hash Argon2. Cek `is_active`. 3x gagal berturut-turut mengunci akun 5 menit (`failed_attempts`, `locked_until`).
-3. **Wajah:** webcam, embedding dibandingkan dengan yang tersimpan (cosine similarity, threshold di konfigurasi).
+3. **Wajah:** saat pendaftaran dan login, kamera harus mendeteksi tepat satu wajah. Pengguna menghadap depan, menoleh ke arah acak sesuai petunjuk, lalu kembali menghadap depan. SFace memeriksa identitas sepanjang gerakan memakai cosine similarity dengan threshold di konfigurasi.
 
 Aturan:
 - **Satu dongle satu orang**: `dongle_serial UNIQUE`. Setelah username diketik, dongle harus cocok dengan akun TERSEBUT (serial + SHA-256 token). Dongle milik orang lain ditolak.
@@ -210,7 +210,9 @@ Dependensi: PySide6, cryptography, argon2-cffi, opencv-python, numpy, Pillow, ps
 
 ## 10. Keterbatasan yang Diakui (untuk laporan)
 
-LSB rapuh terhadap kompresi; tidak ada liveness detection wajah; Vigenère lemah secara kriptanalisis (lapisan klasik); Vernam bukan OTP murni — perfect secrecy tidak dipertahankan karena keystream pseudo-acak berasal dari HKDF, bukan kunci acak sungguhan yang dibagikan sebelumnya; panjang ciphertext membocorkan panjang pesan asli; panjang pesan dibatasi 8160 byte oleh batas output HKDF-SHA256; HMAC yang hanya mencakup nonce dan ciphertext tidak dapat mendeteksi kunci Vernam yang salah (akan menghasilkan plaintext bytes berbeda); blockchain lokal tidak terdistribusi; satu master key dan satu admin (jika dongle admin hilang, pemulihan lewat `recovery.key` yang disimpan offline; tanpa file itu, data tidak bisa dipulihkan); file kunci dongle bisa disalin.
+Pemeriksaan gerakan wajah memakai kamera RGB. Keandalannya dipengaruhi cahaya dan kualitas deteksi, dan perlindungannya terhadap rekaman video atau wajah sintetis terbatas.
+
+LSB rapuh terhadap kompresi; Vigenère lemah secara kriptanalisis (lapisan klasik); Vernam bukan OTP murni — perfect secrecy tidak dipertahankan karena keystream pseudo-acak berasal dari HKDF, bukan kunci acak sungguhan yang dibagikan sebelumnya; panjang ciphertext membocorkan panjang pesan asli; panjang pesan dibatasi 8160 byte oleh batas output HKDF-SHA256; HMAC yang hanya mencakup nonce dan ciphertext tidak dapat mendeteksi kunci Vernam yang salah (akan menghasilkan plaintext bytes berbeda); blockchain lokal tidak terdistribusi; satu master key dan satu admin (jika dongle admin hilang, pemulihan lewat `recovery.key` yang disimpan offline; tanpa file itu, data tidak bisa dipulihkan); file kunci dongle bisa disalin.
 
 <!-- antislop:start -->
 ## antislop

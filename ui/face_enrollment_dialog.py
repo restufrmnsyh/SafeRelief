@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections import deque
-
 import cv2
 import numpy as np
 from PySide6.QtCore import Qt
@@ -29,14 +27,12 @@ class FaceEnrollmentDialog(QDialog):
         self.resize(500, 420)
         self._volunteer_name = volunteer_name
         self._camera_worker: CameraWorker | None = None
-        self._last_frame: np.ndarray | None = None
-        self._recent_frames: deque[np.ndarray] = deque(maxlen=6)
         self._capture_result: np.ndarray | None = None
         self._capture_worker: FaceCaptureWorker | None = None
         self._cancelled = False
 
         self.instruction_label = QLabel(
-            f"Posisikan wajah {volunteer_name} di tengah frame, lalu klik Rekam Wajah"
+            f"Pastikan hanya wajah {volunteer_name} yang terlihat di kamera."
         )
         self.instruction_label.setWordWrap(True)
 
@@ -92,10 +88,11 @@ class FaceEnrollmentDialog(QDialog):
         worker.wait(2000)
         self._camera_worker = None
 
-    def _display_frame(self, image: QImage) -> None:
-        frame = self._qimage_to_bgr(image)
-        self._last_frame = frame
-        self._recent_frames.append(frame.copy())
+    def _display_frame(self, image: QImage, captured_at: float) -> None:
+        if self.sender() is not None and self.sender() is not self._camera_worker:
+            return
+        if self._capture_worker is not None:
+            self._capture_worker.submit_frame(self._qimage_to_bgr(image), captured_at)
         pixmap = QPixmap.fromImage(image).scaled(
             self.camera_label.contentsRect().size(),
             Qt.AspectRatioMode.KeepAspectRatio,
@@ -115,6 +112,9 @@ class FaceEnrollmentDialog(QDialog):
         return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
     def _camera_failed(self, message: str) -> None:
+        if self._capture_worker is not None:
+            self._capture_worker.requestInterruption()
+            self._capture_worker = None
         self.camera_label.setText(message)
         self.status_label.setText(message)
         self.capture_button.setEnabled(False)
@@ -127,17 +127,20 @@ class FaceEnrollmentDialog(QDialog):
 
         if self._cancelled or self._capture_worker is not None:
             return
-        frames = list(self._recent_frames)
-        if not frames and self._last_frame is not None:
-            frames = [self._last_frame]
         self.capture_button.setEnabled(False)
-        self.status_label.setText("Merekam... jangan bergerak")
+        self.status_label.setText("Memulai pemeriksaan wajah...")
 
-        worker = FaceCaptureWorker(frames)
+        worker = FaceCaptureWorker()
         self._capture_worker = worker
+        worker.instruction.connect(self._show_face_instruction)
         worker.completed.connect(self._capture_completed)
         worker.finished.connect(self._capture_finished)
         worker.start()
+
+    def _show_face_instruction(self, message: str) -> None:
+        if self._capture_worker is not None and self.sender() is self._capture_worker:
+            self.status_label.setText(message)
+            self._capture_worker.prompt_shown()
 
     def _capture_finished(self) -> None:
         """Aktifkan tombol coba lagi setelah worker selesai."""
@@ -148,10 +151,10 @@ class FaceEnrollmentDialog(QDialog):
 
     def _capture_completed(self, encoding: object, error: str) -> None:
         """Abaikan hasil yang tiba setelah dialog dibatalkan."""
-        if self._cancelled or self.sender() is not self._capture_worker:
+        if self._capture_worker is None or self._cancelled or self.sender() is not self._capture_worker:
             return
-        if error:
-            self.status_label.setText(error)
+        if error or encoding is None:
+            self.status_label.setText(error or "Pemeriksaan wajah gagal. Coba lagi.")
             return
         self._capture_result = encoding
         self.status_label.setText("Wajah berhasil direkam!")
@@ -177,8 +180,6 @@ class FaceEnrollmentDialog(QDialog):
             self._capture_worker.requestInterruption()
             self._capture_worker = None
         self._capture_result = None
-        self._recent_frames.clear()
-        self._last_frame = None
         self.stop_camera()
         super().reject()
 

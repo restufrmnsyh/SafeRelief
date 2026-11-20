@@ -74,6 +74,10 @@ python app.py
 
 **PENTING**: Aplikasi hanya bisa dijalankan jika dongle yang valid tercolok.
 
+Saat mendaftarkan wajah atau login, pastikan hanya satu orang terlihat di kamera.
+Hadapkan wajah ke depan, tolehkan kepala sesuai petunjuk di layar, lalu kembali
+menghadap kamera. Jika wajah hilang atau kamera mendeteksi orang kedua, ulangi pemeriksaan.
+
 ## 📁 Struktur Proyek
 
 ```
@@ -134,7 +138,7 @@ pytest tests/test_db.py -v
 ### Keterbatasan
 
 - LSB rapuh terhadap kompresi gambar
-- Tidak ada liveness detection untuk wajah
+- Tantangan gerakan kepala membantu menolak foto diam. Kamera RGB memiliki keterbatasan terhadap rekaman video dan wajah sintetis.
 - Vigenère lemah secara kriptanalisis (hanya lapisan demonstrasi)
 - Vernam bukan OTP murni: keystream pseudo-acak dari HKDF tidak memberi perfect secrecy
 - Nonce 16 byte wajib unik untuk setiap pesan; reuse keystream memungkinkan two-time-pad attack

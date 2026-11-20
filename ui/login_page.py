@@ -1,7 +1,7 @@
 """Halaman login tiga faktor dengan form akun dan pratinjau wajah terpusat."""
 
 import sqlite3
-from collections import deque
+from time import monotonic
 
 import cv2
 import numpy as np
@@ -24,24 +24,26 @@ import config
 from auth import dongle, face_auth, login, session
 from crypto import keys
 from database import db, secure_store
-from ui.face_capture_worker import FaceCaptureWorker, MODEL_LOCK
+from ui.face_capture_worker import FaceCaptureWorker
 from ui.login_style import LOGIN_STYLE
 
 
 class CameraWorker(QThread):
     """Baca frame webcam di worker agar event loop UI tetap responsif."""
 
-    frame_ready = Signal(QImage)
+    frame_ready = Signal(QImage, float)
     camera_error = Signal(str)
 
     def run(self) -> None:
-        camera = face_auth._open_camera(0)
+        camera = None
         try:
+            camera = face_auth._open_camera(0)
             if not camera.isOpened():
                 self.camera_error.emit("Webcam tidak dapat dibuka.")
                 return
 
             while not self.isInterruptionRequested():
+                captured_at = monotonic()
                 success, frame = camera.read()
                 if not success or frame is None:
                     self.msleep(30)
@@ -55,50 +57,13 @@ class CameraWorker(QThread):
                     channels * width,
                     QImage.Format.Format_RGB888,
                 ).copy()
-                self.frame_ready.emit(image)
+                self.frame_ready.emit(image, captured_at)
                 self.msleep(30)
-        except cv2.error as exc:
+        except (cv2.error, ValueError, OSError) as exc:
             self.camera_error.emit(f"Kamera gagal: {exc}")
         finally:
-            camera.release()
-
-
-class FaceVerificationWorker(QThread):
-    """Jalankan pencocokan wajah di luar thread UI."""
-
-    completed = Signal(bool, float, str)
-
-    def __init__(
-        self, stored_encoding: np.ndarray, frame: np.ndarray
-    ) -> None:
-        from PySide6.QtWidgets import QApplication
-
-        app = QApplication.instance()
-        super().__init__(app)
-        self._stored_encoding = stored_encoding.copy()
-        self._frame = frame.copy()
-        self.finished.connect(self.deleteLater)
-        if app is not None:
-            app.aboutToQuit.connect(self.shutdown)
-
-    def shutdown(self) -> None:
-        """Selesaikan inferensi sebelum aplikasi menghancurkan worker."""
-        self.requestInterruption()
-        self.wait()
-
-    def run(self) -> None:
-        try:
-            with MODEL_LOCK:
-                if self.isInterruptionRequested():
-                    return
-                matched, score = face_auth.verify_face(
-                    self._stored_encoding, self._frame
-                )
-            if not self.isInterruptionRequested():
-                self.completed.emit(matched, score, "")
-        except (FileNotFoundError, ValueError, cv2.error) as exc:
-            if not self.isInterruptionRequested():
-                self.completed.emit(False, 0.0, str(exc))
+            if camera is not None:
+                camera.release()
 
 
 class LoginPage(QWidget):
@@ -118,9 +83,7 @@ class LoginPage(QWidget):
         self._preauth_db_key: bytes | None = None
         self._stored_encoding: np.ndarray | None = None
         self._last_frame: np.ndarray | None = None
-        self._recent_frames: deque[np.ndarray] = deque(maxlen=6)
         self._camera_worker: CameraWorker | None = None
-        self._face_worker: FaceVerificationWorker | None = None
         self._registration_mode = False
         self._capture_worker: FaceCaptureWorker | None = None
 
@@ -348,10 +311,13 @@ class LoginPage(QWidget):
         if worker.isFinished():
             self._camera_worker = None
 
-    def _display_frame(self, image: QImage) -> None:
+    def _display_frame(self, image: QImage, captured_at: float) -> None:
+        if self.sender() is not None and self.sender() is not self._camera_worker:
+            return
         frame = self._qimage_to_bgr(image)
         self._last_frame = frame
-        self._recent_frames.append(frame.copy())
+        if self._capture_worker is not None:
+            self._capture_worker.submit_frame(frame, captured_at)
         pixmap = QPixmap.fromImage(image).scaled(
             self.camera_label.contentsRect().size(),
             Qt.AspectRatioMode.KeepAspectRatio,
@@ -373,6 +339,9 @@ class LoginPage(QWidget):
         return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
     def _camera_failed(self, message: str) -> None:
+        if self.sender() is not None and self.sender() is not self._camera_worker:
+            return
+        self._clear_pre_auth()
         self.camera_label.setText(message)
         self._set_message(message)
         self.verify_face_button.setEnabled(False)
@@ -400,27 +369,33 @@ class LoginPage(QWidget):
                 )
             )
 
-    def register_current_face(self) -> None:
-        """Daftarkan wajah pengguna dari feed kamera aktif tanpa membuka webcam baru."""
+    def verify_current_face(self) -> None:
+        """Mulai pemeriksaan baru untuk pendaftaran pertama maupun login berikutnya."""
         if not self._gate_open or self._preauth_user is None:
-            self._set_message("Sesi pendaftaran wajah belum siap.")
+            self._set_message("Periksa akun sebelum memverifikasi wajah.")
             return
 
         if self._capture_worker is not None:
             return
-        frames = list(self._recent_frames)
-        if not frames and self._last_frame is not None:
-            frames = [self._last_frame]
-        if not frames:
+        if self._last_frame is None:
             self._set_message("Tunggu sampai frame webcam tersedia.")
             return
-        worker = FaceCaptureWorker(frames)
+        if not self._registration_mode and self._stored_encoding is None:
+            self._set_message("Data wajah belum tersedia. Periksa akun kembali.")
+            return
+        worker = FaceCaptureWorker(self._stored_encoding)
         self._capture_worker = worker
-        worker.completed.connect(self._registration_finished)
+        worker.instruction.connect(self._show_face_instruction)
+        worker.completed.connect(self._face_check_completed)
         worker.finished.connect(self._capture_finished)
         self.verify_face_button.setEnabled(False)
-        self._set_message("Merekam wajah...", "info")
+        self._set_message("Memulai pemeriksaan wajah...", "info")
         worker.start()
+
+    def _show_face_instruction(self, message: str) -> None:
+        if self._capture_worker is not None and self.sender() is self._capture_worker:
+            self._set_message(message, "info")
+            self._capture_worker.prompt_shown()
 
     def _capture_finished(self) -> None:
         """Hasil dari permintaan lama tidak boleh mengubah kontrol sesi baru."""
@@ -429,85 +404,12 @@ class LoginPage(QWidget):
             if self._gate_open and self._preauth_user is not None:
                 self.verify_face_button.setEnabled(True)
 
-    def _registration_finished(self, average_encoding: object, error: str) -> None:
-        """Simpan hasil hanya jika permintaan dan faktor autentikasi masih berlaku."""
-        if self.sender() is not self._capture_worker or not self._gate_open:
+    def _face_check_completed(self, encoding: object, error: str) -> None:
+        """Periksa kembali faktor akun dan dongle sebelum menyimpan atau membuka sesi."""
+        if self._capture_worker is None or self.sender() is not self._capture_worker or not self._gate_open:
             return
-        if error:
-            self._set_message(error)
-            return
-
-        user = self._preauth_user
-        master_key = self._transient_master_key
-        db_key = self._preauth_db_key
-        if user is None or master_key is None or db_key is None:
-            self._set_message("Sesi pendaftaran wajah sudah kedaluwarsa.")
-            self._clear_pre_auth()
-            return
-
-        try:
-            current_user = secure_store.require_active_user(self._conn, int(user["id"]))
-            dongle.verify_dongle(current_user)
-            secure_store.save_face_encoding(
-                self._conn,
-                db_key,
-                int(user["id"]),
-                face_auth.encoding_to_bytes(average_encoding),
-            )
-            self._stored_encoding = average_encoding
-            self._registration_mode = False
-            self._set_face_controls_visible(True)
-            self._set_message("Wajah berhasil didaftarkan.", "success")
-            db.log_activity(self._conn, "LOGIN_SUCCESS", user_id=int(user["id"]))
-            session.login(user, bytes(master_key))
-            self._clear_pre_auth()
-            self.authenticated.emit(user)
-        except (ValueError, OSError, sqlite3.Error, cv2.error) as exc:
-            self._set_message(str(exc))
-
-    def verify_current_face(self) -> None:
-        if not self._gate_open:
-            self._set_message("Tunggu sampai frame webcam tersedia.")
-            return
-
-        if self._registration_mode:
-            self.register_current_face()
-            return
-
-        if self._stored_encoding is None or self._last_frame is None:
-            self._set_message("Tunggu sampai frame webcam tersedia.")
-            return
-        if self._face_worker is not None and self._face_worker.isRunning():
-            return
-
-        worker = FaceVerificationWorker(
-            self._stored_encoding, self._last_frame
-        )
-        worker.completed.connect(self._face_verification_finished)
-        worker.finished.connect(self._face_worker_finished)
-        self._face_worker = worker
-        self.verify_face_button.setEnabled(False)
-        self._set_message("Memverifikasi wajah...", "info")
-        worker.start()
-
-    def _face_verification_finished(
-        self, matched: bool, score: float, error: str
-    ) -> None:
-        if (self.sender() is not None and self.sender() is not self._face_worker
-                or not self._gate_open):
-            return
-        if error:
-            self._set_message(error)
-            self.verify_face_button.setEnabled(True)
-            return
-        if not matched:
-            if score == 0.0:
-                self._set_message("Wajah tidak terdeteksi. Coba lagi.")
-            else:
-                self._set_message(
-                    f"Wajah tidak cocok (skor {score:.3f})."
-                )
-            self.verify_face_button.setEnabled(True)
+        if error or encoding is None:
+            self._set_message(error or "Pemeriksaan wajah gagal. Coba lagi.")
             return
 
         user = self._preauth_user
@@ -518,12 +420,18 @@ class LoginPage(QWidget):
             return
 
         try:
-            current_user = db.get_user_by_id(self._conn, int(user["id"]))
-            if current_user is None or not current_user["is_active"]:
-                raise PermissionError("Akun dinonaktifkan saat proses login.")
+            current_user = secure_store.require_active_user(self._conn, int(user["id"]))
             dongle.verify_dongle(current_user)
-            db.log_activity(self._conn, "LOGIN_SUCCESS", user_id=int(user["id"]))
-        except (OSError, ValueError, sqlite3.Error, PermissionError) as exc:
+            with self._conn:
+                if self._registration_mode:
+                    if self._preauth_db_key is None or current_user["face_encoding_enc"] is not None:
+                        raise ValueError("Sesi pendaftaran wajah sudah kedaluwarsa.")
+                    secure_store.save_face_encoding(
+                        self._conn, self._preauth_db_key, int(user["id"]),
+                        face_auth.encoding_to_bytes(encoding), commit=False,
+                    )
+                db.log_activity(self._conn, "LOGIN_SUCCESS", user_id=int(user["id"]), commit=False)
+        except (OSError, ValueError, sqlite3.Error) as exc:
             self._set_message(str(exc))
             self._clear_pre_auth()
             return
@@ -531,13 +439,6 @@ class LoginPage(QWidget):
         session.login(user, bytes(master_key))
         self._clear_pre_auth()
         self.authenticated.emit(user)
-
-    def _face_worker_finished(self) -> None:
-        if self.sender() is not self._face_worker:
-            return
-        self._face_worker = None
-        if self._gate_open:
-            self.verify_face_button.setEnabled(True)
 
     def _set_face_controls_visible(self, visible: bool) -> None:
         """Perbarui petunjuk kamera tanpa mengubah keputusan autentikasi."""
@@ -554,23 +455,18 @@ class LoginPage(QWidget):
         if self._registration_mode:
             self.verify_face_button.setText("Daftarkan Wajah")
             self.face_title.setText("Pendaftaran wajah")
-            self.camera_hint.setText("Login pertama: daftarkan wajah Anda.")
         else:
             self.verify_face_button.setText("Verifikasi Wajah")
             self.face_title.setText("Verifikasi wajah")
-            self.camera_hint.setText("Tatap kamera, lalu verifikasi wajah.")
+        self.camera_hint.setText("Ikuti petunjuk gerakan setelah menekan tombol.")
         self.verify_face_button.setEnabled(True)
 
     def _clear_pre_auth(self) -> None:
-        if self._face_worker is not None:
-            self._face_worker.requestInterruption()
-            self._face_worker = None
         if self._capture_worker is not None:
             self._capture_worker.requestInterruption()
             self._capture_worker = None
         self.stop_camera()
         self._registration_mode = False
-        self._recent_frames.clear()
         if self._transient_master_key is not None:
             self._transient_master_key[:] = b"\x00" * len(
                 self._transient_master_key

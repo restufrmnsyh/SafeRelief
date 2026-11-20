@@ -339,9 +339,9 @@ class TestDetectAndEmbed:
 
     def test_face_detected_returns_embedding(self, monkeypatch):
         """YuNet menemukan wajah → embedding 1D float32 dikembalikan."""
-        fake_face = np.array([[100, 100, 80, 100, 0.99,
+        fake_face = np.array([[100, 100, 80, 100,
                                130, 140, 160, 140, 145, 155,
-                               125, 165, 155, 165]])  # format YuNet
+                               125, 165, 155, 165, 0.99]])  # format YuNet
         expected = _rand_emb(99).reshape(1, 128)
         detector, recognizer = self._make_mocks(fake_face, expected)
         monkeypatch.setattr(face_auth, "_get_detector", lambda: detector)
@@ -353,3 +353,23 @@ class TestDetectAndEmbed:
         assert result is not None
         assert result.shape == (128,)
         np.testing.assert_array_equal(result, expected.flatten())
+
+    def test_two_faces_rejected_before_recognition(self, monkeypatch):
+        detector, recognizer = self._make_mocks(np.ones((2, 15), dtype=np.float32), None)
+        monkeypatch.setattr(face_auth, "_get_detector", lambda: detector)
+        monkeypatch.setattr(face_auth, "_get_recognizer", lambda: recognizer)
+        with pytest.raises(ValueError, match="lebih dari satu wajah"):
+            face_auth.observe_face(np.zeros((240, 320, 3), dtype=np.uint8))
+        recognizer.alignCrop.assert_not_called()
+
+
+def test_planar_motion_has_no_nose_parallax():
+    """Landmark pada satu bidang datar tetap konsisten di bawah transformasi perspektif."""
+    import cv2
+    from tests.face_camera import observe_pose
+
+    _, points = observe_pose(np.full((1, 1, 3), 128, dtype=np.uint8))
+    transform = np.array([[1.1, 0.7, 10], [0.1, 1.2, 15], [0.001, 0, 1]])
+    moved = cv2.perspectiveTransform(points.reshape(1, 5, 2), transform)[0]
+    assert abs(face_auth.head_turn(moved)) > 0.30
+    assert abs(face_auth.nose_parallax(points, moved)) < 1e-5

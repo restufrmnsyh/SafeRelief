@@ -13,9 +13,11 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from auth import dongle, face_auth, session
+from tests.face_camera import observe_pose, stream_poses
 from crypto import keys
 from database import db
 from ui.face_enrollment_dialog import FaceEnrollmentDialog
+from ui.face_capture_worker import FaceCaptureWorker
 from ui.login_page import LoginPage
 
 
@@ -46,18 +48,33 @@ def process_until(app: QApplication, condition) -> None:
     assert condition()
 
 
+@pytest.mark.parametrize("role", ["admin", "relawan"])
 @pytest.mark.parametrize("outcome", ["success", "mismatch", "error", "dongle_missing", "blocked", "log_failure"])
 def test_existing_face_logs_success_only_after_all_factors(
-    face_context, monkeypatch: pytest.MonkeyPatch, outcome: str,
+    face_context, monkeypatch: pytest.MonkeyPatch, outcome: str, role: str,
 ) -> None:
     """Verifikasi gagal atau log gagal tidak boleh menghasilkan sesi sukses."""
     import sqlite3
 
     app, conn, uid = face_context
+    if role == "relawan":
+        uid = db.insert_user(conn, {
+            "nama_lengkap": "Relawan", "username": "relawan", "role": role,
+            "password_hash": "test-hash",
+        })
     page = LoginPage(conn)
     page._gate_open = True
     page._preauth_user = dict(db.get_user_by_id(conn, uid))
     page._transient_master_key = bytearray(os.urandom(32))
+    page._stored_encoding = np.full(128, -1 if outcome == "mismatch" else 1, dtype=np.float32)
+    page._last_frame = np.zeros((32, 32, 3), dtype=np.uint8)
+
+    def observe(frame: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        if outcome == "error":
+            raise cv2.error("camera error")
+        return observe_pose(frame)
+
+    monkeypatch.setattr(face_auth, "observe_face", observe)
     emitted: list[dict] = []
     page.authenticated.connect(emitted.append)
     if outcome == "blocked":
@@ -70,22 +87,61 @@ def test_existing_face_logs_success_only_after_all_factors(
         def fail_log(*_args, **_kwargs) -> None:
             raise sqlite3.OperationalError("log unavailable")
         monkeypatch.setattr(db, "log_activity", fail_log)
+    timer = stream_poses(page, page.message_label)
     try:
-        page._face_verification_finished(
-            outcome != "mismatch", 0.9, "camera error" if outcome == "error" else "",
-        )
+        page.verify_current_face()
+        assert page._capture_worker is not None
+        process_until(app, lambda: page._capture_worker is None)
         assert session.is_logged_in() == (outcome == "success")
         assert bool(emitted) == (outcome == "success")
         logs = [row for row in db.list_activity_log(conn) if row["aksi"] == "LOGIN_SUCCESS"]
         assert len(logs) == int(outcome == "success")
     finally:
+        timer.stop()
         page.close()
         page.deleteLater()
         app.processEvents()
 
 
-@pytest.mark.parametrize("screen", ["login", "volunteer"])
-@pytest.mark.parametrize("outcome", ["success", "error", "no_face", "cancel", "blocked"])
+def test_expired_camera_frames_are_ignored_and_user_can_retry(face_context, monkeypatch):
+    app, _, _ = face_context
+    page = FaceEnrollmentDialog("Relawan")
+    page._camera_worker = SimpleNamespace(
+        isRunning=lambda: True, requestInterruption=lambda: None, wait=lambda _timeout: True,
+    )
+    observations = []
+
+    def observe(frame: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        observations.append(True)
+        return observe_pose(frame)
+
+    monkeypatch.setattr(face_auth, "observe_face", observe)
+    monkeypatch.setattr(FaceCaptureWorker, "TIMEOUT_SECONDS", 0.4)
+    timer = stream_poses(page, page.status_label, "stale")
+    try:
+        page.capture_button.click()
+        process_until(app, lambda: page._capture_worker is None)
+        assert not observations
+        assert page.capture_result is None
+        assert "Waktu pemeriksaan habis" in page.status_label.text()
+        timer.stop()
+        monkeypatch.setattr(FaceCaptureWorker, "TIMEOUT_SECONDS", 5)
+        timer = stream_poses(page, page.status_label)
+        page.capture_button.click()
+        process_until(app, lambda: page._capture_worker is None)
+        assert page.capture_result is not None
+    finally:
+        timer.stop()
+        page.close()
+        page.deleteLater()
+        app.processEvents()
+
+
+@pytest.mark.parametrize("screen", ["login", "volunteer", "existing"])
+@pytest.mark.parametrize("outcome", [
+    "success", "error", "no_face", "cancel", "blocked", "static", "wrong_direction",
+    "never_return", "multiple_faces", "identity_changed",
+])
 def test_face_capture_runs_off_ui_thread_and_ignores_cancelled_results(
     face_context, monkeypatch: pytest.MonkeyPatch, screen: str, outcome: str,
 ) -> None:
@@ -95,7 +151,7 @@ def test_face_capture_runs_off_ui_thread_and_ignores_cancelled_results(
     threads: list[int] = []
     main_thread = get_ident()
 
-    def detect(_frame: np.ndarray):
+    def detect(frame: np.ndarray):
         threads.append(get_ident())
         entered.set()
         assert release.wait(5)
@@ -103,28 +159,40 @@ def test_face_capture_runs_off_ui_thread_and_ignores_cancelled_results(
             raise cv2.error("simulated OpenCV failure")
         if outcome == "no_face":
             return None
-        return np.ones(128, dtype=np.float32)
+        encoding, points = observe_pose(frame)
+        if int(frame[0, 0, 0]) != 128:
+            if outcome == "multiple_faces":
+                raise ValueError("Terdeteksi lebih dari satu wajah.")
+            if outcome == "identity_changed":
+                encoding = -encoding
+        return encoding, points
 
-    monkeypatch.setattr(face_auth, "_detect_and_embed", detect)
-    if screen == "login":
+    monkeypatch.setattr(face_auth, "observe_face", detect)
+    if outcome in {"static", "wrong_direction", "never_return"}:
+        monkeypatch.setattr(FaceCaptureWorker, "TIMEOUT_SECONDS", 0.8)
+    if screen != "volunteer":
         page = LoginPage(conn)
         page._gate_open = True
-        page._registration_mode = True
+        page._registration_mode = screen == "login"
+        if screen == "existing":
+            page._stored_encoding = np.ones(128, dtype=np.float32)
         page._preauth_user = dict(db.get_user_by_id(conn, uid))
         master = os.urandom(32)
         page._transient_master_key = bytearray(master)
         page._preauth_db_key = keys.derive_key(master, b"db")
+        page._last_frame = np.zeros((32, 32, 3), dtype=np.uint8)
     else:
         page = FaceEnrollmentDialog("Relawan")
         page._camera_worker = SimpleNamespace(
             isRunning=lambda: True, requestInterruption=lambda: None,
             wait=lambda _timeout: True,
         )
-    page._last_frame = np.zeros((32, 32, 3), dtype=np.uint8)
+    label = page.status_label if screen == "volunteer" else page.message_label
+    timer = stream_poses(page, label, outcome)
     tick: list[bool] = []
     try:
-        if screen == "login":
-            page.register_current_face()
+        if screen != "volunteer":
+            page.verify_current_face()
         else:
             page.capture_face()
         worker = page._capture_worker
@@ -134,19 +202,19 @@ def test_face_capture_runs_off_ui_thread_and_ignores_cancelled_results(
         process_until(app, lambda: bool(tick))
         assert all(thread != main_thread for thread in threads)
         if outcome == "cancel":
-            if screen == "login":
+            if screen != "volunteer":
                 page._clear_pre_auth()
             else:
                 page.reject()
-        if outcome == "blocked" and screen == "login":
+        if outcome == "blocked" and screen != "volunteer":
             db.update_user_active(conn, uid, 0)
         release.set()
-        worker.wait(5000)
         process_until(app, lambda: page._capture_worker is None)
-        app.processEvents()
-        if screen == "login":
+        if outcome == "cancel":
+            worker.wait(5000)
+        if screen != "volunteer":
             stored = db.get_user_by_id(conn, uid)["face_encoding_enc"]
-            assert (stored is not None) == (outcome == "success")
+            assert (stored is not None) == (outcome == "success" and screen == "login")
             assert session.is_logged_in() == (outcome == "success")
             success_logs = [r for r in db.list_activity_log(conn) if r["aksi"] == "LOGIN_SUCCESS"]
             assert len(success_logs) == int(outcome == "success")
@@ -158,9 +226,17 @@ def test_face_capture_runs_off_ui_thread_and_ignores_cancelled_results(
             assert "OpenCV failure" in message
         if outcome == "no_face":
             assert "tidak terdeteksi" in message
+        if outcome in {"static", "wrong_direction", "never_return"}:
+            assert "Waktu pemeriksaan habis" in message
+        if outcome == "multiple_faces":
+            assert "lebih dari satu wajah" in message
+        if outcome == "identity_changed":
+            assert "Wajah tidak cocok" in message
     finally:
+        timer.stop()
         release.set()
         if page._capture_worker is not None:
+            page._capture_worker.requestInterruption()
             page._capture_worker.wait(5000)
         page.close()
         page.deleteLater()
